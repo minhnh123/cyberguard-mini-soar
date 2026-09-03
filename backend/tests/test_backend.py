@@ -1,0 +1,174 @@
+import pytest
+import asyncio
+from httpx import AsyncClient, ASGITransport
+from app.main import app
+from app.core.database import init_db
+from app.seed_data.seed import seed_database
+
+@pytest.mark.asyncio
+async def test_api_root_and_health():
+    await init_db()
+    await seed_database()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "operational"
+
+@pytest.mark.asyncio
+async def test_alert_ingestion_and_auto_incident():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Simulate SSH Brute force
+        resp = await client.post("/api/v1/alerts/simulate?scenario=ssh_bruteforce")
+        assert resp.status_code == 200
+        alert_data = resp.json()
+        assert alert_data["severity"] in ["high", "critical", "medium"]
+        assert alert_data["source_ip"] == "185.220.101.45"
+
+        # Check incidents list
+        inc_resp = await client.get("/api/v1/incidents")
+        assert inc_resp.status_code == 200
+        incidents = inc_resp.json()
+        assert len(incidents) > 0
+        latest_inc = incidents[0]
+        assert "Brute Force" in latest_inc["title"] or latest_inc["severity"] in ["high", "critical", "medium"]
+
+        # Check pending approvals
+        app_resp = await client.get("/api/v1/approvals")
+        assert app_resp.status_code == 200
+        approvals = app_resp.json()
+        assert len(approvals) > 0
+        
+        # Test approval action (Approve)
+        approval_id = approvals[0]["id"]
+        decision_resp = await client.post(
+            f"/api/v1/approvals/{approval_id}/decision",
+            json={"decision": "approve", "analyst_note": "Approved by SOC Lead in automated test"}
+        )
+        assert decision_resp.status_code == 200
+        decision_data = decision_resp.json()
+        assert decision_data["status"] in ["executed", "success", "failed"]
+
+@pytest.mark.asyncio
+async def test_threat_intel_ip_geo():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/threat-intel/lookup?ioc_type=ip&ioc_value=8.8.8.8")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enrichment" in data
+        assert data["ioc_value"] == "8.8.8.8"
+
+@pytest.mark.asyncio
+async def test_wazuh_vm_connector_endpoints():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Test Agent Discovery
+        agents_resp = await client.get("/api/v1/connectors/wazuh/agents")
+        assert agents_resp.status_code == 200
+        agents_data = agents_resp.json()
+        assert "data" in agents_data
+
+        # 2. Test Trigger Scan on Agent 001
+        scan_resp = await client.post(
+            "/api/v1/connectors/wazuh/agents/001/scan",
+            json={"scan_type": "syscheck"}
+        )
+        assert scan_resp.status_code == 200
+        scan_data = scan_resp.json()
+        assert scan_data["agent_id"] == "001"
+        assert "syscheck" in scan_data["scan_type"].lower()
+
+@pytest.mark.asyncio
+async def test_live_attack_vm_endpoint():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/alerts/live-attack-vm",
+            json={"target_ip": "127.0.0.1", "attack_type": "port_scan", "attempts": 3}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert len(data["logs"]) > 0
+
+@pytest.mark.asyncio
+async def test_alert_deduplication_and_correlation():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Ingest alert 1
+        r1 = await client.post("/api/v1/alerts/simulate?scenario=ssh_bruteforce")
+        assert r1.status_code == 200
+        a1 = r1.json()
+        assert a1["incident_id"] is not None
+        initial_inc_id = a1["incident_id"]
+
+        # Ingest alert 2 with identical scenario/source_ip within correlation window
+        r2 = await client.post("/api/v1/alerts/simulate?scenario=ssh_bruteforce")
+        assert r2.status_code == 200
+        a2 = r2.json()
+        # Should be correlated to the same incident!
+        assert a2["incident_id"] == initial_inc_id
+        assert a2["status"] == "correlated"
+
+        # Check incident detail and alert count
+        inc_res = await client.get(f"/api/v1/incidents/{initial_inc_id}")
+        assert inc_res.status_code == 200
+        inc_data = inc_res.json()
+        assert len(inc_data["alerts"]) >= 2
+
+@pytest.mark.asyncio
+async def test_incident_unblock_rollback():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Get incidents
+        inc_resp = await client.get("/api/v1/incidents")
+        assert inc_resp.status_code == 200
+        incidents = inc_resp.json()
+        assert len(incidents) > 0
+        target_inc = incidents[0]
+
+        # Trigger unblock
+        unblock_resp = await client.post(
+            f"/api/v1/incidents/{target_inc['id']}/unblock",
+            json={
+                "target": "185.220.101.45",
+                "connector": "windows_firewall",
+                "analyst_note": "Unblocked in automated pytest"
+            }
+        )
+        assert unblock_resp.status_code == 200
+        unblock_data = unblock_resp.json()
+        assert unblock_data["status"] == "success"
+        assert unblock_data["target"] == "185.220.101.45"
+
+@pytest.mark.asyncio
+async def test_webhook_secret_auth_and_input_sanitization():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Gửi secret sai -> Bị chặn 401
+        r_bad = await client.post(
+            "/api/v1/alerts/webhook",
+            json={"title": "Test Auth Alert", "source_ip": "103.20.5.1"},
+            headers={"X-Webhook-Secret": "invalid_fake_secret"}
+        )
+        assert r_bad.status_code == 401
+        assert "Unauthorized" in r_bad.json()["detail"]
+
+        # 2. Gửi secret đúng -> Thành công 200 & kiểm tra input sanitization
+        r_good = await client.post(
+            "/api/v1/alerts/webhook",
+            json={
+                "title": "Legitimate Sanitized Alert",
+                "source_ip": "  103.20.5.1  ",
+                "agent_id": "agent_001; rm -rf /"
+            },
+            headers={"X-Webhook-Secret": "cyberguard-soar-secret"}
+        )
+        assert r_good.status_code == 200
+        data = r_good.json()
+        assert data["source_ip"] == "103.20.5.1"
+        assert ";" not in data["agent_id"]
+        assert "rm -rf" not in data["agent_id"]

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CyberGuard SOAR - Platform Architecture",
+    "subtitle": "AI-Powered Security Orchestration, Automation & Response Architecture",
+    "output": "docs/diagrams/soar-architecture.html",
+    "visual_preset": "blueprint",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "ingestion-and-intelligence",
+        "label": "Ingestion and Intelligence Pipeline",
+        "focus": ["sources", "simulator", "gateway", "enrichment", "ai_copilot"],
+        "note": "Follow telemetry signals into the gateway, enrichment pipeline, and AI Copilot reasoning."
+      },
+      {
+        "id": "human-governance-loop",
+        "label": "Human Governance and Approvals",
+        "focus": ["playbook_engine", "approvals", "frontend", "connectors"],
+        "note": "SOC Analyst 1-Click decision gate bridging AI suggestions and active containment."
+      },
+      {
+        "id": "full-containment-loop",
+        "label": "End-to-End Containment Loop",
+        "focus": ["gateway", "playbook_engine", "connectors", "database"],
+        "note": "From automated trigger to multi-platform firewall and endpoint containment."
+      }
+    ]
+  },
+  "components": [
+    { "id": "frontend", "type": "frontend", "label": "SOC Web Dashboard", "sublabel": "React + Vite + Flow", "pos": [320, 80], "size": [160, 60], "tag": "Port 5173" },
+    { "id": "approvals", "type": "security", "label": "Approval Gateway", "sublabel": "Human-in-the-Loop", "pos": [640, 80], "size": [160, 60], "tag": "Governance" },
+    { "id": "sources", "type": "external", "label": "Alert Sources", "sublabel": "Wazuh / Suricata / EDR", "pos": [40, 260], "size": [150, 60], "tag": "Telemetry" },
+    { "id": "gateway", "type": "security", "label": "FastAPI Webhook", "sublabel": "Normalizer & Router", "pos": [320, 260], "size": [160, 60], "tag": "Port 8000" },
+    { "id": "playbook_engine", "type": "backend", "label": "Playbook Engine", "sublabel": "Node DAG & Runner", "pos": [640, 260], "size": [160, 60], "tag": "Orchestrator" },
+    { "id": "connectors", "type": "backend", "label": "Response Connectors", "sublabel": "Firewall / SSH / WAF / EDR", "pos": [960, 260], "size": [160, 60], "tag": "Containment" },
+    { "id": "simulator", "type": "messagebus", "label": "Attack Simulator", "sublabel": "5 MITRE Scenarios", "pos": [40, 440], "size": [150, 60], "tag": "Testing" },
+    { "id": "enrichment", "type": "cloud", "label": "Threat Intel Engine", "sublabel": "VirusTotal & GeoIP", "pos": [320, 440], "size": [160, 60], "tag": "Intelligence" },
+    { "id": "ai_copilot", "type": "security", "label": "AI Reasoning Copilot", "sublabel": "Gemini / OpenAI / MITRE", "pos": [640, 440], "size": [160, 60], "tag": "Tier-3 SOC" },
+    { "id": "database", "type": "database", "label": "SQLAlchemy Storage", "sublabel": "Incidents, Logs, State", "pos": [960, 440], "size": [160, 60], "tag": "SQLite/PG" }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "SOC Analyst Command & Decision Layer",
+      "wraps": ["frontend", "approvals"]
+    },
+    {
+      "kind": "region",
+      "label": "CyberGuard SOAR Core Processing Platform",
+      "wraps": ["gateway", "playbook_engine", "connectors", "enrichment", "ai_copilot", "database"]
+    }
+  ],
+  "connections": [
+    { "from": "sources", "to": "gateway", "label": "JSON Webhook", "variant": "emphasis" },
+    { "from": "simulator", "to": "gateway", "label": "Simulate Attack", "variant": "dashed" },
+    { "from": "frontend", "to": "gateway", "label": "REST API", "variant": "default", "labelAt": [400, 195] },
+    { "from": "frontend", "to": "approvals", "label": "1-Click Decision", "variant": "emphasis" },
+    { "from": "gateway", "to": "enrichment", "label": "Enrich IOCs", "variant": "emphasis", "labelAt": [400, 375] },
+    { "from": "enrichment", "to": "ai_copilot", "label": "Enriched Context", "variant": "security" },
+    { "from": "ai_copilot", "to": "playbook_engine", "label": "MITRE Tactics", "variant": "emphasis", "labelAt": [660, 375] },
+    { "from": "playbook_engine", "to": "approvals", "label": "Pending Action", "variant": "security", "labelAt": [720, 195] },
+    { "from": "approvals", "to": "connectors", "label": "Execute Containment", "variant": "emphasis", "fromSide": "right", "toSide": "top", "labelAt": [930, 185] },
+    { "from": "playbook_engine", "to": "connectors", "label": "Autonomous Action", "variant": "dashed", "labelAt": [880, 260] },
+    { "from": "playbook_engine", "to": "database", "label": "Persist Audit Log", "variant": "default", "fromSide": "right", "toSide": "top", "labelAt": [880, 370] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Unified Telemetry Ingestion",
+      "items": [
+        "Normalizes Wazuh, Suricata, EDR, and custom logs into common IOC schema",
+        "Local cache reduces external VirusTotal v3 and GeoIP API consumption",
+        "Real-time correlation into centralized Incident records"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "AI Copilot & MITRE ATT&CK",
+      "items": [
+        "Tier-3 LLM reasoning maps techniques (T1110, T1486, T1190) automatically",
+        "Calculates False-Positive Score and Incident Confidence Rating",
+        "Proposes actionable containment playbooks tailored to detected threat"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Human-in-the-Loop Containment",
+      "items": [
+        "High-risk remediation (IP bans, host isolation) requires analyst 1-Click approval",
+        "Multi-platform connectors: Windows Firewall, Linux SSH/iptables, Cloudflare WAF",
+        "Full audit trail logged to ActionLog and Incident timeline"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CyberGuard SOAR - Incident Response Lifecycle",
+    "subtitle": "Automated Ingestion, Threat Intel, AI MITRE Triage, Human-in-the-Loop & Multi-Platform Containment",
+    "output": "docs/diagrams/soar-incident-response.html",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "full-lifecycle",
+        "label": "Full Incident Response Lifecycle",
+        "focus": ["alert_in", "normalize", "enrich_intel", "ai_reasoning", "playbook_match", "approval_queue", "analyst_decision", "contain_dispatch", "resolve_incident"],
+        "note": "Trace security events from initial alert ingestion to analyst approval and automated containment."
+      },
+      {
+        "id": "ai-triage-path",
+        "label": "AI Intelligence and Playbook Selection",
+        "focus": ["normalize", "enrich_intel", "ai_reasoning", "playbook_match"],
+        "note": "IOC extraction, VirusTotal enrichment, and LLM MITRE ATT&CK technique mapping."
+      },
+      {
+        "id": "governance-containment",
+        "label": "Governance Gate and Containment",
+        "focus": ["approval_queue", "analyst_decision", "contain_dispatch", "resolve_incident"],
+        "note": "Human-in-the-loop validation, remediation execution, and audit logging."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "signals", "label": "1. Telemetry Ingestion" },
+    { "id": "enrichment_lane", "label": "2. Intelligence & AI Triage" },
+    { "id": "orchestration", "label": "3. Playbook Orchestration" },
+    { "id": "human_gate", "label": "4. Human Governance Gate", "variant": "exception" },
+    { "id": "containment", "label": "5. Active Containment" }
+  ],
+  "phases": [
+    { "id": "intake_phase", "label": "Intake & Normalization", "fromCol": 0, "toCol": 1 },
+    { "id": "triage_phase", "label": "Enrichment & AI Triage", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "contain_phase", "label": "Approval & Containment", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "ai_triage_group", "label": "AI SOC Copilot Analysis", "lane": "enrichment_lane", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "governance_group", "label": "Analyst Review Gate", "lane": "human_gate", "fromCol": 4, "toCol": 5, "variant": "security" },
+    { "id": "containment_group", "label": "Remediation & Closure", "lane": "containment", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["alert_in", "normalize", "enrich_intel", "ai_reasoning", "playbook_match", "approval_queue", "analyst_decision", "contain_dispatch", "resolve_incident"],
+  "nodes": [
+    { "id": "alert_in", "lane": "signals", "col": 0, "type": "messagebus", "label": "Security Alert", "sublabel": "Wazuh / Suricata / EDR", "tag": "Webhook Intake", "width": 132 },
+    { "id": "normalize", "lane": "signals", "col": 1, "type": "backend", "label": "Alert Normalizer", "sublabel": "Extract IP, Hash, Host", "tag": "FastAPI Parser", "width": 132 },
+    { "id": "enrich_intel", "lane": "enrichment_lane", "col": 2, "type": "cloud", "label": "Threat Intelligence", "sublabel": "VirusTotal & GeoIP Cache", "tag": "Enrichment", "width": 132 },
+    { "id": "ai_reasoning", "lane": "enrichment_lane", "col": 3, "type": "security", "label": "AI SOC Copilot", "sublabel": "MITRE ATT&CK & RCA", "tag": "Tier-3 Reasoning", "width": 132 },
+    { "id": "playbook_match", "lane": "orchestration", "col": 4, "type": "backend", "label": "Playbook Engine", "sublabel": "Match Trigger & DAG", "tag": "Orchestrator", "width": 132 },
+    { "id": "approval_queue", "lane": "human_gate", "col": 4, "type": "security", "label": "Approval Gateway", "sublabel": "Pending High-Risk Actions", "tag": "Pending Queue", "width": 132 },
+    { "id": "analyst_decision", "lane": "human_gate", "col": 5, "type": "frontend", "label": "SOC Analyst", "sublabel": "1-Click Approve / Reject", "tag": "SOC Dashboard", "width": 132 },
+    { "id": "contain_dispatch", "lane": "containment", "col": 5, "type": "backend", "label": "Response Connectors", "sublabel": "Firewall / SSH / WAF", "tag": "Live Containment", "width": 132 },
+    { "id": "resolve_incident", "lane": "orchestration", "col": 5, "type": "database", "label": "Incident Contained", "sublabel": "Update Status & ActionLog", "tag": "Audit Trail", "width": 132 }
+  ],
+  "edges": [
+    { "id": "e_ingest", "from": "alert_in", "to": "normalize", "variant": "default" },
+    { "id": "e_enrich", "from": "normalize", "to": "enrich_intel", "label": "IOCs", "variant": "emphasis" },
+    { "id": "e_ai_triage", "from": "enrich_intel", "to": "ai_reasoning", "label": "context", "variant": "security" },
+    { "id": "e_match_pb", "from": "ai_reasoning", "to": "playbook_match", "label": "MITRE TTPs", "variant": "emphasis" },
+    { "id": "e_req_approval", "from": "playbook_match", "to": "approval_queue", "label": "propose", "variant": "security" },
+    { "id": "e_analyst_review", "from": "approval_queue", "to": "analyst_decision", "variant": "emphasis" },
+    { "id": "e_approved", "from": "analyst_decision", "to": "contain_dispatch", "label": "approved", "variant": "emphasis" },
+    { "id": "e_resolve", "from": "contain_dispatch", "to": "resolve_incident", "label": "record", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Automated Signal Intake",
+      "items": [
+        "Universal webhook normalizer parses Wazuh, Suricata, and custom alerts",
+        "Automated IOC extraction for IPs, hashes, domains, and agent IDs",
+        "Enrichment service caches VirusTotal v3 and GeoIP lookups"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "AI-Driven Triage & MITRE Mapping",
+      "items": [
+        "LLM Copilot analyzes root causes and constructs attack narrative",
+        "Tags MITRE ATT&CK techniques (T1110, T1486, T1190) automatically",
+        "Generates tailored containment recommendations with risk scoring"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Governance & Safe Containment",
+      "items": [
+        "Human-in-the-Loop gateway prevents disruptive false-positive blocks",
+        "SOC Analyst 1-Click review triggers multi-platform response connectors",
+        "Comprehensive execution audit recorded in database ActionLog"
+      ]
+    }
+  ]
+}
