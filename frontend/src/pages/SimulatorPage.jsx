@@ -286,7 +286,9 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
                     </option>
                   ))}
                 </select>
-                <span className="text-[10px] text-slate-500 mt-1 block">IP độc hại quốc tế để tra cứu Geolocation & ASN</span>
+                <span className="text-[10px] text-slate-400 mt-1 block leading-tight">
+                  💡 <strong className="text-cyan-400">Đổi IP khác</strong> để tạo Sự cố mới riêng biệt, hoặc <strong className="text-amber-400">giữ nguyên IP</strong> để kiểm tra Deduplication (gom cụm 15m).
+                </span>
               </div>
 
               {/* Attempts Slider */}
@@ -440,6 +442,32 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
                   </div>
                 )}
               </div>
+
+              {/* Deduplication or New Incident Status Banner */}
+              {liveAttackLogs.incident_id && (
+                liveAttackLogs.is_correlated ? (
+                  <div className="p-3 rounded-lg bg-cyan-950/60 border border-cyan-500/40 text-cyan-200 text-xs flex items-start gap-2.5">
+                    <Zap className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-cyan-300 uppercase tracking-wider text-[11px] block">⚡ ĐÃ KÍCH HOẠT CƠ CHẾ DEDUPLICATION (GOM CỤM TỰ ĐỘNG)</span>
+                      <p className="mt-0.5 text-slate-300">
+                        Cảnh báo này đã được gom vào <strong>Sự cố #{liveAttackLogs.incident_id}</strong> do cùng xuất phát từ IP kẻ tấn công <strong>{liveAttackLogs.spoofed_ip}</strong> trong vòng 15 phút. SOAR chống tràn cảnh báo nên không sinh thẻ sự cố thừa.
+                        <span className="text-cyan-400 block mt-1">👉 Mẹo: Để tạo một Sự cố MỚI TINH, hãy đổi "Spoofed Attacker Source IP" sang một IP quốc gia khác ở bảng trên!</span>
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-200 text-xs flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-emerald-300 uppercase tracking-wider text-[11px] block">✓ ĐÃ KHỞI TẠO SỰ CỐ MỚI THÀNH CÔNG</span>
+                      <p className="mt-0.5 text-slate-300">
+                        Sự cố <strong>#{liveAttackLogs.incident_id}</strong> đã được tạo mới với đầy đủ hồ sơ Threat Intelligence cho IP <strong>{liveAttackLogs.spoofed_ip}</strong> và kích hoạt chuỗi SOAR Playbook.
+                      </p>
+                    </div>
+                  </div>
+                )
+              )}
 
               {/* Logs Stream */}
               <div className="bg-black/90 p-4 rounded-xl border border-slate-900 font-mono text-xs text-slate-300 max-h-72 overflow-y-auto space-y-1">

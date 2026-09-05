@@ -786,7 +786,11 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
         }
         created_alert = await process_alert_ingestion(sim_payload, db)
         incident_id = created_alert.incident_id
-        logs.append(f"[✓] SOAR Incident #{incident_id} created with enriched Threat Intel for {spoofed_ip}!")
+        is_correlated = (created_alert.status == "correlated")
+        if is_correlated:
+            logs.append(f"[⚡ DEDUPLICATION] Cảnh báo được GOM CỤM vào Sự cố #{incident_id} (Kẻ tấn công {spoofed_ip} đang có chuỗi tấn công liên tiếp trong 15 phút, kích hoạt cơ chế chống rác Incident).")
+        else:
+            logs.append(f"[✓ NEW INCIDENT] Khởi tạo Sự cố MỚI #{incident_id} với hồ sơ Threat Intel cho {spoofed_ip}!")
 
     return {
         "status": "success",
@@ -795,5 +799,6 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
         "spoofed_ip": spoofed_ip,
         "attempts": attempts,
         "incident_id": incident_id,
+        "is_correlated": is_correlated if trigger_soar_pipeline else False,
         "logs": logs
     }
