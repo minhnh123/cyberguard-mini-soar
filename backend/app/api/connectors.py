@@ -1,10 +1,14 @@
+import datetime
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.core.database import get_db
+from app.models.models import PendingApproval, ActionLog
 from app.services.response_service import ResponseService
+from app.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/connectors", tags=["Connectors"])
 
@@ -90,11 +94,64 @@ async def delete_firewall_rule_endpoint(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Delete / unblock a specific firewall rule from VM iptables or Windows Firewall.
+    Delete / unblock a specific firewall rule from VM iptables or Windows Firewall,
+    synchronizing pending approvals and broadcasting real-time updates.
     """
-    return await ResponseService.delete_firewall_rule(
+    res = await ResponseService.delete_firewall_rule(
         connector=payload.connector,
         target=payload.target,
         parameters=payload.parameters,
         db=db
     )
+
+    if res.get("status") == "failed":
+        raise HTTPException(status_code=400, detail=res.get("message", "Lỗi khi gỡ rule tường lửa"))
+
+    # Also synchronize any active executed approval for this target & connector to 'reverted'
+    target_clean = payload.target.strip()
+    result = await db.execute(
+        select(PendingApproval).where(
+            PendingApproval.target == target_clean,
+            PendingApproval.status.in_(["executed", "approved"])
+        )
+    )
+    approvals = result.scalars().all()
+    for appr in approvals:
+        appr.status = "reverted"
+        existing_note = appr.analyst_note or ""
+        appr.analyst_note = f"{existing_note} | Gỡ bỏ trực tiếp từ VM Rules Inspector".strip(" |")
+        appr.resolved_at = datetime.datetime.utcnow()
+
+        # Add ActionLog for complete SOC auditability
+        action_log = ActionLog(
+            incident_id=appr.incident_id,
+            action_type="unblock_ip",
+            connector=payload.connector,
+            target=payload.target,
+            status="success",
+            output_message=res.get("message") or f"Rule {payload.target} deleted from VM Rules Inspector",
+            executed_by="Analyst (VM Rules Inspector)"
+        )
+        db.add(action_log)
+
+    if approvals:
+        await db.commit()
+
+    # Broadcast WebSocket events
+    try:
+        await ws_manager.broadcast("TARGET_UNBLOCKED", {
+            "target": payload.target,
+            "connector": payload.connector,
+            "status": "reverted",
+            "message": res.get("message")
+        })
+        await ws_manager.broadcast("APPROVAL_RESOLVED", {
+            "target": payload.target,
+            "connector": payload.connector,
+            "decision": "rollback",
+            "status": "reverted"
+        })
+    except Exception:
+        pass
+
+    return res

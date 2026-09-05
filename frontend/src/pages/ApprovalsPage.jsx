@@ -40,6 +40,8 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
   const [rulesLoading, setRulesLoading] = useState(false);
   const [vmRulesData, setVmRulesData] = useState(null);
   const [deletingRuleTarget, setDeletingRuleTarget] = useState(null);
+  const [confirmDeleteTarget, setConfirmDeleteTarget] = useState(null);
+  const [ruleNotification, setRuleNotification] = useState(null);
   const [showRawOutput, setShowRawOutput] = useState(false);
   const [copiedRaw, setCopiedRaw] = useState(false);
 
@@ -113,17 +115,23 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
   };
 
   // Handle Delete Rule directly from VM Firewall Rules modal
-  const handleDeleteRule = async (target) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn gỡ bỏ rule [${target}] khỏi tường lửa ${activeRulesConnector}?`)) {
-      return;
-    }
+  const executeDeleteRule = async (target) => {
     try {
       setDeletingRuleTarget(target);
-      await ConnectorsAPI.deleteFirewallRule(activeRulesConnector, target);
+      setRuleNotification(null);
+      const res = await ConnectorsAPI.deleteFirewallRule(activeRulesConnector, target);
+      setRuleNotification({
+        type: 'success',
+        message: res.message || `Đã gỡ bỏ thành công rule [${target}] khỏi tường lửa ${activeRulesConnector}!`
+      });
+      setConfirmDeleteTarget(null);
       await loadFirewallRules(activeRulesConnector);
       await loadApprovals();
     } catch (err) {
-      alert(`Không thể gỡ rule: ${err.message}`);
+      setRuleNotification({
+        type: 'error',
+        message: `Không thể gỡ rule [${target}]: ${err.response?.data?.detail || err.message}`
+      });
     } finally {
       setDeletingRuleTarget(null);
     }
@@ -524,6 +532,30 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                 </div>
               )}
 
+              {/* Action Notification Banner */}
+              {ruleNotification && (
+                <div className={`p-3.5 rounded-xl border text-xs flex items-center justify-between transition ${
+                  ruleNotification.type === 'success'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    {ruleNotification.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    )}
+                    <span className="font-medium">{ruleNotification.message}</span>
+                  </div>
+                  <button
+                    onClick={() => setRuleNotification(null)}
+                    className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               {/* Rules Table */}
               {rulesLoading ? (
                 <div className="py-16 text-center text-xs text-slate-500 space-y-2">
@@ -544,48 +576,75 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {vmRulesData.rules.map((rule, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/30 transition">
-                          <td className="p-3 text-slate-400">
-                            #{rule.line_num || idx + 1}
-                          </td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                              (rule.target || rule.action || '').toUpperCase() === 'DROP' || (rule.action || '').toUpperCase() === 'BLOCK'
-                                ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                            }`}>
-                              {rule.target || rule.action || 'DROP'}
-                            </span>
-                          </td>
-                          <td className="p-3 text-cyan-300">
-                            {rule.protocol || rule.direction || 'all'}
-                          </td>
-                          <td className="p-3">
-                            <strong className="text-slate-100 font-bold">
-                              {rule.source || rule.remote_ip || rule.name || '0.0.0.0/0'}
-                            </strong>
-                          </td>
-                          <td className="p-3 text-slate-400">
-                            {rule.destination || '0.0.0.0/0'}
-                          </td>
-                          <td className="p-3 text-right">
-                            <button
-                              onClick={() => handleDeleteRule(rule.source || rule.line_num || rule.name)}
-                              disabled={deletingRuleTarget === (rule.source || rule.line_num || rule.name)}
-                              className="px-2.5 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition inline-flex items-center gap-1"
-                              title="Gỡ bỏ rule này ngay lập tức"
-                            >
-                              {deletingRuleTarget === (rule.source || rule.line_num || rule.name) ? (
-                                <RefreshCw className="w-3 h-3 animate-spin" />
+                      {vmRulesData.rules.map((rule, idx) => {
+                        const targetVal = rule.source || rule.line_num || rule.name;
+                        const isConfirming = confirmDeleteTarget === targetVal;
+                        const isDeleting = deletingRuleTarget === targetVal;
+
+                        return (
+                          <tr key={idx} className="hover:bg-slate-800/30 transition">
+                            <td className="p-3 text-slate-400">
+                              #{rule.line_num || idx + 1}
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                                (rule.target || rule.action || '').toUpperCase() === 'DROP' || (rule.action || '').toUpperCase() === 'BLOCK'
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              }`}>
+                                {rule.target || rule.action || 'DROP'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-cyan-300">
+                              {rule.protocol || rule.direction || 'all'}
+                            </td>
+                            <td className="p-3">
+                              <strong className="text-slate-100 font-bold">
+                                {rule.source || rule.remote_ip || rule.name || '0.0.0.0/0'}
+                              </strong>
+                            </td>
+                            <td className="p-3 text-slate-400">
+                              {rule.destination || '0.0.0.0/0'}
+                            </td>
+                            <td className="p-3 text-right">
+                              {isConfirming ? (
+                                <div className="inline-flex items-center gap-1.5 justify-end">
+                                  <button
+                                    onClick={() => executeDeleteRule(targetVal)}
+                                    disabled={isDeleting}
+                                    className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition shadow flex items-center gap-1"
+                                  >
+                                    {isDeleting ? (
+                                      <RefreshCw className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="w-3 h-3" />
+                                    )}
+                                    <span>Xác nhận xóa</span>
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDeleteTarget(null)}
+                                    className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px] transition"
+                                  >
+                                    Hủy
+                                  </button>
+                                </div>
                               ) : (
-                                <Trash2 className="w-3 h-3" />
+                                <button
+                                  onClick={() => {
+                                    setConfirmDeleteTarget(targetVal);
+                                    setRuleNotification(null);
+                                  }}
+                                  className="px-2.5 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition inline-flex items-center gap-1"
+                                  title="Gỡ bỏ rule này ngay lập tức"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Gỡ bỏ</span>
+                                </button>
                               )}
-                              <span>Gỡ bỏ</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
