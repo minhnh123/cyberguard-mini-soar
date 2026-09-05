@@ -68,3 +68,33 @@ async def trigger_agent_action(
         parameters={"command": payload.command, "custom": payload.custom},
         db=db
     )
+
+class DeleteFirewallRuleRequest(BaseModel):
+    connector: str = "linux_ssh"
+    target: str
+    parameters: Dict[str, Any] = {}
+
+@router.get("/firewall-rules")
+async def get_firewall_rules(
+    connector: str = Query("linux_ssh", description="linux_ssh or windows_firewall"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retrieve live firewall rules configured on the target VM (iptables on Linux VM or Windows Firewall).
+    """
+    return await ResponseService.list_firewall_rules(connector=connector, db=db)
+
+@router.post("/firewall-rules/delete")
+async def delete_firewall_rule_endpoint(
+    payload: DeleteFirewallRuleRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete / unblock a specific firewall rule from VM iptables or Windows Firewall.
+    """
+    return await ResponseService.delete_firewall_rule(
+        connector=payload.connector,
+        target=payload.target,
+        parameters=payload.parameters,
+        db=db
+    )

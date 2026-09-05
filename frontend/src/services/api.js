@@ -32,6 +32,8 @@ export const ApprovalsAPI = {
   list: (params) => api.get('/approvals', { params }).then(r => r.data),
   decision: (id, decision, analystNote = '') =>
     api.post(`/approvals/${id}/decision`, { decision, analyst_note: analystNote }).then(r => r.data),
+  rollback: (id, analystNote = '') =>
+    api.post(`/approvals/${id}/rollback`, { analyst_note: analystNote }).then(r => r.data),
 };
 
 export const PlaybooksAPI = {
@@ -55,6 +57,10 @@ export const ConnectorsAPI = {
     api.post(`/connectors/wazuh/agents/${agentId}/scan`, { scan_type: scanType }).then(r => r.data),
   triggerWazuhAction: (agentId, command) =>
     api.post(`/connectors/wazuh/agents/${agentId}/action`, { command }).then(r => r.data),
+  getFirewallRules: (connector = 'linux_ssh') =>
+    api.get('/connectors/firewall-rules', { params: { connector } }).then(r => r.data),
+  deleteFirewallRule: (connector, target, parameters = {}) =>
+    api.post('/connectors/firewall-rules/delete', { connector, target, parameters }).then(r => r.data),
 };
 
 export const SettingsAPI = {

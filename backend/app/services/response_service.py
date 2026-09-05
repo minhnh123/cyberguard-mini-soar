@@ -357,6 +357,258 @@ class ResponseService:
             }
 
     @classmethod
+    async def delete_rule_linux_ssh_by_num(cls, line_num: str, parameters: Dict[str, Any] = None, db=None) -> Dict[str, Any]:
+        if not line_num or not str(line_num).strip().isdigit():
+            return {"status": "failed", "message": "Invalid rule line number"}
+        clean_num = str(int(str(line_num).strip()))
+
+        configs = await cls.get_connector_settings(db, "LINUX_SSH")
+        host = configs.get("LINUX_SSH_HOST") or "192.168.56.107"
+        user = configs.get("LINUX_SSH_USER") or "minh"
+        password = configs.get("LINUX_SSH_PASSWORD") or "kali"
+        port = int(configs.get("LINUX_SSH_PORT") or 22)
+
+        try:
+            import paramiko
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            credentials_to_try = [
+                (user, password),
+                ("minh", "minhhot852"),
+                ("minh", "kali"),
+                ("minh", "minh"),
+                ("kali", "kali"),
+                ("root", "toor")
+            ]
+            connected = False
+            last_err = ""
+            active_pass = password
+            for u, p in credentials_to_try:
+                try:
+                    client.connect(hostname=host, port=port, username=u, password=p, timeout=4.0)
+                    active_pass = p
+                    connected = True
+                    break
+                except Exception as ex:
+                    last_err = str(ex)
+
+            if not connected:
+                return {"status": "failed", "message": f"SSH connection failed: {last_err}"}
+
+            cmd = f"echo '{active_pass}' | sudo -S iptables -D INPUT {clean_num}"
+            stdin, stdout, stderr = client.exec_command(cmd)
+            out = stdout.read().decode('utf-8')
+            err = stderr.read().decode('utf-8')
+            exit_code = stdout.channel.recv_exit_status()
+            client.close()
+
+            if exit_code == 0:
+                return {
+                    "status": "success",
+                    "mode": "live",
+                    "message": f"Đã xoá rule #{clean_num} thành công khỏi iptables trên máy ảo {host}."
+                }
+            else:
+                return {
+                    "status": "failed",
+                    "message": f"Không thể xoá rule #{clean_num} trên máy ảo {host}: {err.strip() or out.strip()}"
+                }
+        except Exception as e:
+            return {"status": "failed", "message": f"Lỗi SSH khi xoá rule trên {host}: {str(e)}"}
+
+    @classmethod
+    async def list_firewall_rules_linux_ssh(cls, db=None) -> Dict[str, Any]:
+        configs = await cls.get_connector_settings(db, "LINUX_SSH")
+        host = configs.get("LINUX_SSH_HOST") or "192.168.56.107"
+        user = configs.get("LINUX_SSH_USER") or "minh"
+        password = configs.get("LINUX_SSH_PASSWORD") or "kali"
+        port = int(configs.get("LINUX_SSH_PORT") or 22)
+
+        try:
+            import paramiko
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            credentials_to_try = [
+                (user, password),
+                ("minh", "minhhot852"),
+                ("minh", "kali"),
+                ("minh", "minh"),
+                ("kali", "kali"),
+                ("root", "toor")
+            ]
+            connected = False
+            last_err = ""
+            active_user = user
+            active_pass = password
+
+            for u, p in credentials_to_try:
+                try:
+                    client.connect(hostname=host, port=port, username=u, password=p, timeout=4.0)
+                    active_user = u
+                    active_pass = p
+                    connected = True
+                    break
+                except Exception as ex:
+                    last_err = str(ex)
+
+            if not connected:
+                return {
+                    "status": "offline",
+                    "connector": "linux_ssh",
+                    "host": host,
+                    "message": f"Không thể kết nối SSH tới máy ảo {host} (User: {user}). Lỗi: {last_err}",
+                    "rules_count": 0,
+                    "rules": [],
+                    "raw_output": ""
+                }
+
+            cmd = f"echo '{active_pass}' | sudo -S iptables -L INPUT -n --line-numbers"
+            stdin, stdout, stderr = client.exec_command(cmd)
+            raw_out = stdout.read().decode('utf-8')
+            client.close()
+
+            rules = []
+            for line in raw_out.splitlines():
+                line_s = line.strip()
+                if not line_s:
+                    continue
+                parts = line_s.split()
+                if parts and parts[0].isdigit():
+                    num = int(parts[0])
+                    target = parts[1] if len(parts) > 1 else ""
+                    prot = parts[2] if len(parts) > 2 else ""
+                    opt = parts[3] if len(parts) > 3 else ""
+                    src = parts[4] if len(parts) > 4 else ""
+                    dst = parts[5] if len(parts) > 5 else ""
+                    rules.append({
+                        "line_num": num,
+                        "target": target,
+                        "protocol": prot,
+                        "options": opt,
+                        "source": src,
+                        "destination": dst,
+                        "raw": line_s
+                    })
+
+            return {
+                "status": "success",
+                "connector": "linux_ssh",
+                "host": host,
+                "user": active_user,
+                "rules_count": len(rules),
+                "rules": rules,
+                "raw_output": raw_out
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "connector": "linux_ssh",
+                "host": host,
+                "message": f"Lỗi truy vấn iptables trên máy ảo {host}: {str(e)}",
+                "rules_count": 0,
+                "rules": [],
+                "raw_output": ""
+            }
+
+    @classmethod
+    async def list_firewall_rules_windows(cls) -> Dict[str, Any]:
+        if platform.system().lower() == "windows":
+            try:
+                cmd = 'netsh advfirewall firewall show rule name=all dir=in'
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+                raw_out = stdout.decode('utf-8', errors='ignore')
+
+                rules = []
+                current_rule = {}
+                for line in raw_out.splitlines():
+                    line_s = line.strip()
+                    if line_s.startswith("Rule Name:") or line_s.startswith("Tên quy tắc:"):
+                        if current_rule and "name" in current_rule:
+                            if "CyberGuard" in current_rule.get("name", "") or current_rule.get("action") == "Block":
+                                rules.append(current_rule)
+                        parts = line_s.split(":", 1)
+                        current_rule = {"name": parts[1].strip() if len(parts) > 1 else ""}
+                    elif ":" in line_s and current_rule:
+                        k, v = line_s.split(":", 1)
+                        k = k.strip().lower()
+                        v = v.strip()
+                        if "action" in k or "hành động" in k:
+                            current_rule["action"] = v
+                        elif "enabled" in k or "đã bật" in k:
+                            current_rule["enabled"] = v
+                        elif "remoteip" in k or "ip từ xa" in k:
+                            current_rule["remote_ip"] = v
+                        elif "direction" in k or "hướng" in k:
+                            current_rule["direction"] = v
+
+                if current_rule and "name" in current_rule:
+                    if "CyberGuard" in current_rule.get("name", "") or current_rule.get("action") == "Block":
+                        rules.append(current_rule)
+
+                return {
+                    "status": "success",
+                    "connector": "windows_firewall",
+                    "rules_count": len(rules),
+                    "rules": rules,
+                    "raw_output": raw_out[:3000] if len(raw_out) > 3000 else raw_out
+                }
+            except Exception as e:
+                return {
+                    "status": "failed",
+                    "connector": "windows_firewall",
+                    "message": f"Error querying Windows Firewall: {str(e)}",
+                    "rules": [],
+                    "raw_output": ""
+                }
+        else:
+            return {
+                "status": "success",
+                "connector": "windows_firewall",
+                "mode": "simulated",
+                "rules_count": 0,
+                "rules": [],
+                "raw_output": "Windows Defender Firewall not supported on non-Windows host."
+            }
+
+    @classmethod
+    async def list_firewall_rules(cls, connector: str = "linux_ssh", db=None) -> Dict[str, Any]:
+        connector = connector.lower()
+        if connector == "linux_ssh":
+            return await cls.list_firewall_rules_linux_ssh(db=db)
+        elif connector == "windows_firewall":
+            return await cls.list_firewall_rules_windows()
+        else:
+            return {
+                "status": "success",
+                "connector": connector,
+                "rules_count": 0,
+                "rules": [],
+                "raw_output": f"Connector '{connector}' does not support active rule listing."
+            }
+
+    @classmethod
+    async def delete_firewall_rule(cls, connector: str, target: str, parameters: Dict[str, Any] = None, db=None) -> Dict[str, Any]:
+        connector = connector.lower()
+        parameters = parameters or {}
+        if connector == "linux_ssh":
+            clean_ip = sanitize_ip(target)
+            if clean_ip:
+                return await cls.unblock_ip_linux_ssh(clean_ip, parameters, db)
+            else:
+                return await cls.delete_rule_linux_ssh_by_num(target, parameters, db)
+        elif connector == "windows_firewall":
+            return await cls.unblock_ip_windows(target, parameters)
+        else:
+            return {"status": "success", "mode": "simulated", "message": f"Deleted rule {target} on {connector}"}
+
+    @classmethod
     async def block_ip_cloudflare(cls, ip: str, parameters: Dict[str, Any], db=None) -> Dict[str, Any]:
         configs = await cls.get_connector_settings(db, "CLOUDFLARE")
         token = configs.get("CLOUDFLARE_API_TOKEN") or settings.CLOUDFLARE_API_TOKEN

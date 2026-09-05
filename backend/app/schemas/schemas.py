@@ -148,6 +148,9 @@ class ApprovalDecisionRequest(BaseModel):
     decision: str  # approve, reject
     analyst_note: Optional[str] = None
 
+class ApprovalRollbackRequest(BaseModel):
+    analyst_note: Optional[str] = "Hoàn tác bởi SOC Analyst"
+
 # Action Log Schema
 class ActionLogResponse(BaseModel):
     id: int

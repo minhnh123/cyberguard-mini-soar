@@ -8,7 +8,7 @@ from sqlalchemy import desc
 
 from app.core.database import get_db
 from app.models.models import PendingApproval, Incident, ActionLog, PlaybookExecution
-from app.schemas.schemas import PendingApprovalResponse, ApprovalDecisionRequest
+from app.schemas.schemas import PendingApprovalResponse, ApprovalDecisionRequest, ApprovalRollbackRequest
 from app.services.response_service import ResponseService
 from app.services.websocket_manager import ws_manager
 
@@ -136,3 +136,97 @@ async def handle_approval_decision(
 
     else:
         raise HTTPException(status_code=400, detail="Invalid decision. Must be 'approve' or 'reject'.")
+
+@router.post("/{approval_id}/rollback")
+async def handle_approval_rollback(
+    approval_id: int,
+    request: Optional[ApprovalRollbackRequest] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Rollback/Undo an already executed approval action (e.g., unblock an IP on Kali Linux VM or Windows Firewall).
+    """
+    result = await db.execute(select(PendingApproval).where(PendingApproval.id == approval_id))
+    approval = result.scalars().first()
+    if not approval:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+
+    if approval.status == "reverted":
+        return {
+            "status": "already_reverted",
+            "message": "Yêu cầu này đã được hoàn tác trước đó.",
+            "approval_id": approval.id
+        }
+
+    if approval.status not in ["executed", "approved"]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Không thể hoàn tác yêu cầu với trạng thái '{approval.status}'. Chỉ có thể hoàn tác yêu cầu đã thực thi (executed)."
+        )
+
+    analyst_note = request.analyst_note if request else "Hoàn tác bởi SOC Analyst"
+
+    # Determine rollback action
+    rollback_action = "unblock_ip"
+    if approval.action_type in ["isolate_wazuh_agent", "isolate"]:
+        rollback_action = "reconnect_wazuh_agent"
+
+    # Execute rollback via ResponseService
+    exec_res = await ResponseService.execute_action(
+        connector=approval.connector,
+        action_type=rollback_action,
+        target=approval.target,
+        parameters=approval.parameters or {},
+        db=db
+    )
+
+    exec_status = exec_res.get("status", "success")
+
+    # Record in ActionLog for complete auditability
+    action_log = ActionLog(
+        incident_id=approval.incident_id,
+        action_type=rollback_action,
+        connector=approval.connector,
+        target=approval.target,
+        status=exec_status,
+        output_message=exec_res.get("message") or f"Rollback executed for approval #{approval.id}",
+        executed_by=f"Analyst Rollback ({analyst_note})" if analyst_note else "Analyst Rollback"
+    )
+    db.add(action_log)
+
+    # Update approval record status
+    approval.status = "reverted"
+    existing_note = approval.analyst_note or ""
+    approval.analyst_note = f"{existing_note} | Hoàn tác: {analyst_note}".strip(" |")
+    approval.resolved_at = datetime.datetime.utcnow()
+
+    await db.commit()
+
+    # Broadcast real-time updates via WebSocket
+    try:
+        await ws_manager.broadcast("TARGET_UNBLOCKED", {
+            "approval_id": approval.id,
+            "incident_id": approval.incident_id,
+            "target": approval.target,
+            "connector": approval.connector,
+            "status": "reverted",
+            "message": exec_res.get("message")
+        })
+        await ws_manager.broadcast("APPROVAL_RESOLVED", {
+            "approval_id": approval.id,
+            "incident_id": approval.incident_id,
+            "decision": "rollback",
+            "status": "reverted",
+            "target": approval.target,
+            "connector": approval.connector
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "approval_status": "reverted",
+        "message": exec_res.get("message") or f"Đã hoàn tác và gỡ chặn {approval.target} trên {approval.connector} thành công.",
+        "execution_result": exec_res,
+        "approval_id": approval.id
+    }

@@ -172,3 +172,60 @@ async def test_webhook_secret_auth_and_input_sanitization():
         assert data["source_ip"] == "103.20.5.1"
         assert ";" not in data["agent_id"]
         assert "rm -rf" not in data["agent_id"]
+
+@pytest.mark.asyncio
+async def test_approval_rollback():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Check existing approvals
+        resp = await client.get("/api/v1/approvals")
+        assert resp.status_code == 200
+        approvals = resp.json()
+        
+        # If no approval, simulate an alert to create one
+        if not approvals:
+            await client.post("/api/v1/alerts/simulate?scenario=brute_force")
+            resp = await client.get("/api/v1/approvals")
+            approvals = resp.json()
+
+        assert len(approvals) > 0
+        appr = approvals[0]
+        
+        # If pending, approve it first
+        if appr["status"] == "pending":
+            dec_resp = await client.post(
+                f"/api/v1/approvals/{appr['id']}/decision",
+                json={"decision": "approve", "analyst_note": "Approved in pytest"}
+            )
+            assert dec_resp.status_code == 200
+
+        # Now test rollback
+        rb_resp = await client.post(
+            f"/api/v1/approvals/{appr['id']}/rollback",
+            json={"analyst_note": "Rollback in pytest"}
+        )
+        assert rb_resp.status_code == 200
+        rb_data = rb_resp.json()
+        assert rb_data["status"] in ["success", "already_reverted"]
+        if rb_data["status"] == "success":
+            assert rb_data["approval_status"] == "reverted"
+
+@pytest.mark.asyncio
+async def test_firewall_rules_inspection():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Query linux_ssh rules
+        resp_linux = await client.get("/api/v1/connectors/firewall-rules?connector=linux_ssh")
+        assert resp_linux.status_code == 200
+        data_linux = resp_linux.json()
+        assert "status" in data_linux
+        assert "rules" in data_linux
+        assert isinstance(data_linux["rules"], list)
+
+        # 2. Query windows_firewall rules
+        resp_win = await client.get("/api/v1/connectors/firewall-rules?connector=windows_firewall")
+        assert resp_win.status_code == 200
+        data_win = resp_win.json()
+        assert "status" in data_win
+        assert "rules" in data_win
+        assert isinstance(data_win["rules"], list)
