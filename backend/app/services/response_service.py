@@ -835,7 +835,12 @@ class ResponseService:
                     }
 
         except Exception as e:
-            return {"status": "failed", "message": f"Scan execution error: {str(e)}"}
+            return {
+                "status": "failed",
+                "agent_id": agent_id,
+                "scan_type": scan_type,
+                "message": f"Scan execution error: {str(e)}"
+            }
 
     @classmethod
     async def execute_wazuh_action(cls, target: str, action_type: str, parameters: Dict[str, Any], db=None) -> Dict[str, Any]:

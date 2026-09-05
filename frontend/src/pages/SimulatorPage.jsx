@@ -7,98 +7,158 @@ import {
   Send, 
   CheckCircle2, 
   FileCode, 
-  ExternalLink,
-  Flame,
-  Lock,
-  Server,
-  Crosshair,
-  Globe
+  ExternalLink, 
+  Flame, 
+  Lock, 
+  Server, 
+  Crosshair, 
+  Globe,
+  RotateCcw,
+  Check,
+  AlertTriangle,
+  Play
 } from 'lucide-react';
 import { AlertsAPI } from '../services/api';
 
 export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
-  const [selectedScenario, setSelectedScenario] = useState('ssh_bruteforce');
-  const [customJson, setCustomJson] = useState('{\n  "title": "Custom High-Severity Web Shell Alert",\n  "severity": "high",\n  "source": "Custom-EDR",\n  "source_ip": "194.26.29.112",\n  "hostname": "WEB-SRV-01",\n  "description": "Suspicious PHP webshell execution detected in /var/www/uploads/"\n}');
-  const [loading, setLoading] = useState(false);
-  const [simulationResult, setSimulationResult] = useState(null);
-  const [activeTab, setActiveTab] = useState('presets'); // 'presets' | 'live_vm' | 'custom'
+  const [activeTab, setActiveTab] = useState('live_vm'); // 'live_vm' | 'custom'
 
-  // Live Red-Team VM Attack States with Spoofed Attacker IP
+  // Live Red-Team VM Attack States
   const [targetVmIp, setTargetVmIp] = useState('192.168.56.107');
+  const [targetPort, setTargetPort] = useState('');
   const [spoofedAttackerIp, setSpoofedAttackerIp] = useState('185.220.101.45');
-  const [liveAttackType, setLiveAttackType] = useState('ssh_bruteforce');
+  const [selectedVector, setSelectedVector] = useState('ssh_bruteforce');
   const [liveAttempts, setLiveAttempts] = useState(10);
+  const [loading, setLoading] = useState(false);
   const [liveAttackLogs, setLiveAttackLogs] = useState(null);
+
+  // Custom JSON Webhook State
+  const [customJson, setCustomJson] = useState('{\n  "title": "Custom High-Severity Web Shell Alert",\n  "severity": "high",\n  "source": "Custom-EDR",\n  "source_ip": "194.26.29.112",\n  "hostname": "WEB-SRV-01",\n  "description": "Suspicious PHP webshell execution detected in /var/www/uploads/"\n}');
+  const [customResult, setCustomResult] = useState(null);
 
   const HOSTILE_IP_PRESETS = [
     { ip: '185.220.101.45', label: '🇩🇪 185.220.101.45 (Tor Exit Node - Germany)' },
     { ip: '45.154.255.89', label: '🇳🇱 45.154.255.89 (Hostile Scanner - Netherlands)' },
     { ip: '194.26.29.112', label: '🇷🇺 194.26.29.112 (Cobalt Strike C2 - Russia)' },
-    { ip: '193.142.146.33', label: '🇧🇬 193.142.146.33 (Botnet Cluster - Bulgaria)' },
-    { ip: '89.248.165.74', label: '🇸🇨 89.248.165.74 (Bulletproof Hosting - Seychelles)' }
+    { ip: '193.142.146.33', label: '🇧🇬 193.142.146.33 (Mirai Botnet Cluster - Bulgaria)' },
+    { ip: '89.248.165.74', label: '🇸🇨 89.248.165.74 (Bulletproof Hosting - Seychelles)' },
+    { ip: '103.20.5.1', label: '🇻🇳 103.20.5.1 (Malicious Web Exploit Origin - Vietnam)' }
   ];
 
-  const scenarios = [
+  const ATTACK_VECTORS = [
     {
       id: 'ssh_bruteforce',
-      title: 'SSH Authentication Brute Force Attack',
-      source: 'Wazuh Agent 001',
-      severity: 'high',
-      mitre: 'T1110 (Brute Force)',
-      description: '50 rapid failed login attempts from external Tor exit node IP 185.220.101.45. Triggers IP enrichment and Firewall block approval.',
+      name: 'SSH Brute Force Auth Flood',
+      protocol: 'TCP / Port 22',
+      defaultPort: 22,
+      mitre: 'T1110.001 (Password Guessing)',
+      severity: 'HIGH',
+      badge: 'Kernel Auth Failures',
       icon: Terminal,
-      color: 'border-orange-500/40 bg-orange-950/10'
+      color: 'rose',
+      description: 'Gửi liên tục các gói tin xác thực SSH với từ điển tài khoản (admin, root, kali_guest, devops...) ghi log thất bại thực tế vào /var/log/auth.log trên máy ảo.'
     },
     {
-      id: 'ransomware',
-      title: 'Wazuh Ransomware & Volume Shadow Copy Deletion',
-      source: 'Wazuh Endpoint 002',
-      severity: 'critical',
-      mitre: 'T1486 (Data Encrypted for Impact)',
-      description: 'Execution of vssadmin delete shadows /all on finance workstation. Triggers emergency Wazuh Agent host quarantine proposal.',
-      icon: Lock,
-      color: 'border-rose-500/40 bg-rose-950/10'
-    },
-    {
-      id: 'malware_hash',
-      title: 'Cobalt Strike Beacon Dropper Executed',
-      source: 'Corporate EDR',
-      severity: 'critical',
-      mitre: 'T1059 (Command Interpreter) / T1071 (C2)',
-      description: 'Known malware hash written to disk by suspicious process. Triggers VirusTotal scan and host isolation.',
-      icon: Flame,
-      color: 'border-rose-500/40 bg-rose-950/10'
+      id: 'web_rce_cmd_injection',
+      name: 'Web RCE & Webshell Injection Exploit',
+      protocol: 'HTTP / Port 80, 8080',
+      defaultPort: 80,
+      mitre: 'T1059.004 (Unix Shell Command Injection)',
+      severity: 'CRITICAL',
+      badge: 'Critical Exploit Payload',
+      icon: Zap,
+      color: 'rose',
+      description: 'Bắn chuỗi khai thác Remote Code Execution (id;whoami;cat /etc/passwd), Shellshock CVE-2014-6271 và Log4Shell JNDI injection (${jndi:ldap://...}).'
     },
     {
       id: 'web_sqli',
-      title: 'Web Application SQL Injection & RCE Exploit',
-      source: 'Suricata IDS',
-      severity: 'high',
+      name: 'Web SQL Injection & Path Traversal',
+      protocol: 'HTTP / Port 80, 8080',
+      defaultPort: 80,
       mitre: 'T1190 (Exploit Public-Facing App)',
-      description: 'UNION SELECT SQL injection targeting billing API from external IP 45.154.255.89. Triggers Cloudflare WAF block proposal.',
+      severity: 'HIGH',
+      badge: 'SQLi & LFI Payloads',
       icon: ShieldAlert,
-      color: 'border-cyan-500/40 bg-cyan-950/10'
+      color: 'amber',
+      description: 'Fuzzing các chuỗi SQLi UNION SELECT, OR 1=1 và Directory Traversal (../../../../etc/passwd, .env, wp-config) kèm header X-Forwarded-For giả lập.'
     },
     {
       id: 'port_scan',
-      title: 'NMAP Reconnaissance & Port Sweep',
-      source: 'Suricata Network Monitor',
-      severity: 'medium',
+      name: 'TCP SYN & Service Discovery Port Sweep',
+      protocol: 'TCP Full-Range (16 Ports)',
+      defaultPort: null,
       mitre: 'T1046 (Network Service Discovery)',
-      description: 'Port sweep of standard service ports from hostile subnet 193.142.146.33.',
+      severity: 'MEDIUM',
+      badge: 'Reconnaissance Sweep',
       icon: Radio,
-      color: 'border-amber-500/40 bg-amber-950/10'
+      color: 'cyan',
+      description: 'Quét thăm dò 16 cổng dịch vụ phổ biến (SSH 22, Web 80/443, SMB 445, MySQL 3306, RDP 3389, Wazuh 55000, Elastic 9200) để lập bản đồ mạng mục tiêu.'
+    },
+    {
+      id: 'http_slowloris_dos',
+      name: 'HTTP Slowloris & Request Exhaustion DoS',
+      protocol: 'HTTP Sockets / Port 80',
+      defaultPort: 80,
+      mitre: 'T1498.001 (Direct Network Flood)',
+      severity: 'HIGH',
+      badge: 'Denial of Service',
+      icon: Flame,
+      color: 'orange',
+      description: 'Mở đồng thời nhiều kết nối HTTP socket dở dang và gửi header chậm từng phần nhằm làm cạn kiệt tài nguyên xử lý của web server trên máy ảo.'
+    },
+    {
+      id: 'ftp_telnet_credential_stuffing',
+      name: 'FTP / Telnet Credential Stuffing',
+      protocol: 'FTP / Telnet (Port 21/23)',
+      defaultPort: 21,
+      mitre: 'T1110.004 (Credential Stuffing)',
+      severity: 'HIGH',
+      badge: 'Service Auth Flood',
+      icon: Lock,
+      color: 'yellow',
+      description: 'Kết nối socket trực tiếp tới cổng dịch vụ FTP/Telnet trên máy ảo, thử xác thực anonymous, root:toor, admin:admin123 để kích hoạt quy tắc Wazuh 11100.'
+    },
+    {
+      id: 'smb_null_session',
+      name: 'SMB / RPC Null Session & Share Probe',
+      protocol: 'SMB / NetBIOS (Port 445/139)',
+      defaultPort: 445,
+      mitre: 'T1078.001 (Default Accounts)',
+      severity: 'HIGH',
+      badge: 'Lateral Movement Probe',
+      icon: Server,
+      color: 'indigo',
+      description: 'Gửi gói tin thương lượng SMB Negotiate Protocol Packet để kiểm tra Samba share và cố gắng kết nối phiên làm việc ẩn danh (Null Session).'
+    },
+    {
+      id: 'udp_dns_amplification',
+      name: 'UDP Reflection & DNS Amplification Probe',
+      protocol: 'UDP Datagrams (Port 53/123)',
+      defaultPort: 53,
+      mitre: 'T1498.002 (Reflection Amplification)',
+      severity: 'MEDIUM',
+      badge: 'UDP Flood Traffic',
+      icon: Globe,
+      color: 'teal',
+      description: 'Bắn các gói tin UDP phân giải DNS ANY và NTP monlist để kiểm tra lưu lượng UDP xâm nhập và kích hoạt phát hiện Suricata IDS Rule 514.'
     }
   ];
 
-  const handleRunPreset = async (scenarioId) => {
+  const handleLaunchLiveVmAttack = async () => {
     try {
       setLoading(true);
-      setSimulationResult(null);
-      const res = await AlertsAPI.simulate(scenarioId);
-      setSimulationResult(res);
+      setLiveAttackLogs(null);
+      const res = await AlertsAPI.launchLiveAttack({
+        target_ip: targetVmIp,
+        target_port: targetPort ? parseInt(targetPort) : undefined,
+        spoofed_ip: spoofedAttackerIp,
+        attack_type: selectedVector,
+        attempts: liveAttempts,
+        trigger_soar_pipeline: true
+      });
+      setLiveAttackLogs(res);
     } catch (err) {
-      alert(`Simulation error: ${err.message}`);
+      alert(`Khởi chạy tấn công thất bại: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -107,64 +167,47 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
   const handleSendCustom = async () => {
     try {
       setLoading(true);
-      setSimulationResult(null);
+      setCustomResult(null);
       const parsed = JSON.parse(customJson);
       const res = await AlertsAPI.ingestWebhook(parsed);
-      setSimulationResult(res);
+      setCustomResult(res);
     } catch (err) {
-      alert(`Custom Alert error: ${err.message}`);
+      alert(`Lỗi Webhook Alert: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleLaunchLiveVmAttack = async () => {
-    try {
-      setLoading(true);
-      setLiveAttackLogs(null);
-      const res = await AlertsAPI.launchLiveAttack({
-        target_ip: targetVmIp,
-        spoofed_ip: spoofedAttackerIp,
-        attack_type: liveAttackType,
-        attempts: liveAttempts,
-        trigger_soar_pipeline: true
-      });
-      setLiveAttackLogs(res);
-    } catch (err) {
-      alert(`Failed to launch live attack: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const selectedVectorObj = ATTACK_VECTORS.find(v => v.id === selectedVector) || ATTACK_VECTORS[0];
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="p-5 rounded-xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-indigo-950/40 border border-cyan-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
+      {/* Top Header */}
+      <div className="p-5 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-900 to-indigo-950/40 border border-rose-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-cyan-200 flex items-center gap-2">
-            <Radio className="w-5 h-5 text-cyan-400" />
-            Attack Alert Generator & Red-Team Testing Lab
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-rose-500 animate-ping"></span>
+            <span className="text-[10px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
+              Live Red-Team Lab
+            </span>
+          </div>
+          <h2 className="text-base font-bold text-rose-200 flex items-center gap-2 mt-1">
+            <Crosshair className="w-5 h-5 text-rose-400" />
+            Live VM Attack Launcher & Threat Intel Simulator
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Trigger SOAR alert simulations OR launch real socket/HTTP network attacks directly against your Kali VM with Spoofed Attacker Threat Intel.
+            Phát sinh các gói tin tấn công mạng thật (SSH, Web RCE, SQLi, DoS, Port Scan, FTP, SMB, UDP) sang máy ảo Kali với Spoofed Threat Actor IP để kích hoạt chuỗi SOAR Playbook.
           </p>
         </div>
 
-        <div className="flex rounded-lg bg-slate-900 p-1 border border-slate-800 text-xs">
-          <button
-            onClick={() => setActiveTab('presets')}
-            className={`px-3 py-1.5 rounded-md font-medium transition ${
-              activeTab === 'presets' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Pre-built Scenarios
-          </button>
-
+        {/* Tab Switcher */}
+        <div className="flex rounded-lg bg-slate-900 p-1 border border-slate-800 text-xs shrink-0">
           <button
             onClick={() => setActiveTab('live_vm')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
-              activeTab === 'live_vm' ? 'bg-rose-500 text-slate-950 font-bold shadow-lg shadow-rose-500/20' : 'text-rose-400 hover:text-rose-300'
+            className={`px-4 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
+              activeTab === 'live_vm'
+                ? 'bg-rose-600 text-white font-bold shadow-lg shadow-rose-600/30'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Crosshair className="w-3.5 h-3.5" />
@@ -173,291 +216,315 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
 
           <button
             onClick={() => setActiveTab('custom')}
-            className={`px-3 py-1.5 rounded-md font-medium transition ${
-              activeTab === 'custom' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'
+            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
+              activeTab === 'custom'
+                ? 'bg-cyan-500 text-slate-950 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Custom JSON Webhook
+            <FileCode className="w-3.5 h-3.5" />
+            <span>Custom JSON Webhook</span>
           </button>
         </div>
       </div>
 
-      {/* TAB 1: Preset Scenarios Grid */}
-      {activeTab === 'presets' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {scenarios.map((sc) => {
-            const Icon = sc.icon;
-            return (
-              <div
-                key={sc.id}
-                className={`glass-panel p-5 rounded-xl border ${sc.color} flex flex-col justify-between space-y-4 hover:border-cyan-400/60 transition`}
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
-                      <Icon className="w-4 h-4 text-cyan-400" />
-                    </div>
-                    <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                      {sc.source}
-                    </span>
-                  </div>
-
-                  <h3 className="font-bold text-sm text-slate-100">{sc.title}</h3>
-                  <p className="text-xs text-slate-400 leading-relaxed">{sc.description}</p>
-                </div>
-
-                <div className="space-y-3 pt-2 border-t border-slate-800/80">
-                  <div className="text-[11px] font-mono text-indigo-300">
-                    Target MITRE: <strong>{sc.mitre}</strong>
-                  </div>
-
-                  <button
-                    onClick={() => handleRunPreset(sc.id)}
-                    disabled={loading}
-                    className="w-full py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-sm"
-                  >
-                    <Zap className="w-3.5 h-3.5" />
-                    <span>{loading ? 'Triggering...' : 'Fire Attack Simulation'}</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* TAB 2: LIVE RED TEAM VM ATTACK LAUNCHER */}
+      {/* TAB 1: LIVE RED-TEAM VM ATTACK LAUNCHER */}
       {activeTab === 'live_vm' && (
-        <div className="glass-panel p-6 rounded-xl border border-rose-500/40 bg-rose-950/10 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-rose-500/30">
-            <div>
-              <h3 className="text-sm font-bold text-rose-300 flex items-center gap-2">
-                <Crosshair className="w-5 h-5 text-rose-400" />
-                Live Red-Team VM Attack Launcher & Threat Intel Simulator
+        <div className="space-y-6">
+          {/* Attack Configuration Controls Panel */}
+          <div className="glass-panel p-5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <h3 className="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider flex items-center gap-2">
+                <span>1. Cấu hình Mục tiêu & Danh tính Kẻ tấn công</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                Gửi gói tin tấn công SSH/Web thật sang máy ảo Kali `192.168.56.107` đồng thời gắn danh tính IP độc hại quốc tế để làm giàu Threat Intel & kích hoạt Playbook!
-              </p>
-            </div>
-            <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
-              Live Probe + Spoofed Threat Intel
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-            {/* Target VM IP */}
-            <div>
-              <label className="text-slate-300 font-semibold mb-1 block">Target Virtual Machine IP</label>
-              <input
-                type="text"
-                value={targetVmIp}
-                onChange={(e) => setTargetVmIp(e.target.value)}
-                placeholder="192.168.56.107"
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 font-mono text-cyan-300 focus:outline-none focus:border-rose-500"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">IP máy ảo Kali của bạn</span>
+              <span className="text-[11px] text-slate-400 font-mono">
+                Đích đến: <strong className="text-cyan-400">{targetVmIp}:{targetPort || selectedVectorObj.defaultPort || 'ALL'}</strong>
+              </span>
             </div>
 
-            {/* Spoofed Attacker IP */}
-            <div>
-              <label className="text-slate-300 font-semibold mb-1 block flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Spoofed Attacker Source IP (Fake IP)</span>
-              </label>
-              <select
-                value={spoofedAttackerIp}
-                onChange={(e) => setSpoofedAttackerIp(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 font-mono text-amber-300 focus:outline-none focus:border-rose-500"
-              >
-                {HOSTILE_IP_PRESETS.map((item) => (
-                  <option key={item.ip} value={item.ip}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[10px] text-slate-500 mt-1 block">IP giả lập dùng để tra cứu Geolocation & ASN</span>
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+              {/* Target VM IP */}
+              <div>
+                <label className="text-slate-300 font-semibold mb-1 block">Target Virtual Machine IP</label>
+                <input
+                  type="text"
+                  value={targetVmIp}
+                  onChange={(e) => setTargetVmIp(e.target.value)}
+                  placeholder="192.168.56.107"
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 font-mono text-cyan-300 focus:outline-none focus:border-rose-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">Địa chỉ IP máy ảo Kali Linux của bạn</span>
+              </div>
 
-            {/* Attack Vector */}
-            <div>
-              <label className="text-slate-300 font-semibold mb-1 block">Attack Vector</label>
-              <select
-                value={liveAttackType}
-                onChange={(e) => setLiveAttackType(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 focus:outline-none focus:border-rose-500"
-              >
-                <option value="ssh_bruteforce">💥 SSH Brute Force Authentication Flood (Port 22)</option>
-                <option value="web_sqli">🌐 Web SQL Injection & Path Traversal Fuzzing (Port 80)</option>
-                <option value="port_scan">🔍 TCP Port Discovery & Reconnaissance Scan</option>
-              </select>
-              <span className="text-[10px] text-slate-500 mt-1 block">Kiểu tấn công sẽ phát sinh trên máy ảo</span>
-            </div>
+              {/* Target Custom Port */}
+              <div>
+                <label className="text-slate-300 font-semibold mb-1 block">Target Port (Tuỳ chọn)</label>
+                <input
+                  type="text"
+                  value={targetPort}
+                  onChange={(e) => setTargetPort(e.target.value)}
+                  placeholder={`Mặc định: ${selectedVectorObj.defaultPort || 'Tự động'}`}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 font-mono text-slate-200 focus:outline-none focus:border-rose-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">Để trống nếu dùng cổng mặc định</span>
+              </div>
 
-            {/* Attempts Slider */}
-            <div>
-              <label className="text-slate-300 font-semibold mb-1 block">Number of Attempts: {liveAttempts}</label>
-              <input
-                type="range"
-                min="3"
-                max="15"
-                value={liveAttempts}
-                onChange={(e) => setLiveAttempts(parseInt(e.target.value))}
-                className="w-full mt-2 accent-rose-500 cursor-pointer"
-              />
-              <span className="text-[10px] text-slate-500 mt-1 block">Số lần gửi gói tin đăng nhập sai</span>
+              {/* Spoofed Attacker IP */}
+              <div>
+                <label className="text-slate-300 font-semibold mb-1 block flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Spoofed Attacker Source IP</span>
+                </label>
+                <select
+                  value={spoofedAttackerIp}
+                  onChange={(e) => setSpoofedAttackerIp(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 font-mono text-amber-300 focus:outline-none focus:border-rose-500"
+                >
+                  {HOSTILE_IP_PRESETS.map((item) => (
+                    <option key={item.ip} value={item.ip}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-slate-500 mt-1 block">IP độc hại quốc tế để tra cứu Geolocation & ASN</span>
+              </div>
+
+              {/* Attempts Slider */}
+              <div>
+                <label className="text-slate-300 font-semibold mb-1 block flex items-center justify-between">
+                  <span>Cường độ / Số gói tin:</span>
+                  <strong className="text-rose-400 font-mono">{liveAttempts} lần</strong>
+                </label>
+                <input
+                  type="range"
+                  min="3"
+                  max="25"
+                  value={liveAttempts}
+                  onChange={(e) => setLiveAttempts(parseInt(e.target.value))}
+                  className="w-full mt-2 accent-rose-500 cursor-pointer"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">Số lần gửi gói tin probe / authentication</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <div className="text-[11px] text-slate-400 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Đích đến: <strong>{targetVmIp}</strong> | Nguồn tấn công giả lập: <strong className="text-amber-300 font-mono">{spoofedAttackerIp}</strong></span>
+          {/* Attack Vectors Grid (8 Methods) */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider flex items-center gap-2">
+                <span>2. Chọn Phương thức Tấn công Thực tế ({ATTACK_VECTORS.length} Vectors)</span>
+              </h3>
+              <span className="text-xs text-slate-400">
+                Đang chọn: <strong className="text-rose-400 font-semibold">{selectedVectorObj.name}</strong>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {ATTACK_VECTORS.map((vec) => {
+                const Icon = vec.icon;
+                const isSelected = selectedVector === vec.id;
+
+                return (
+                  <div
+                    key={vec.id}
+                    onClick={() => {
+                      setSelectedVector(vec.id);
+                      if (vec.defaultPort) {
+                        setTargetPort('');
+                      }
+                    }}
+                    className={`cursor-pointer rounded-xl p-4 border transition flex flex-col justify-between space-y-3 relative ${
+                      isSelected
+                        ? 'border-rose-500 bg-rose-950/25 shadow-lg shadow-rose-500/10 ring-1 ring-rose-500/50'
+                        : 'border-slate-800 bg-slate-900/40 hover:border-slate-700 hover:bg-slate-900/70'
+                    }`}
+                  >
+                    {/* Header */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-900 text-slate-400'}`}>
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase border ${
+                          vec.severity === 'CRITICAL'
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                            : vec.severity === 'HIGH'
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                        }`}>
+                          {vec.severity}
+                        </span>
+                      </div>
+
+                      <h4 className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                        {vec.name}
+                      </h4>
+
+                      <div className="text-[11px] font-mono text-cyan-400">
+                        {vec.protocol}
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-3">
+                        {vec.description}
+                      </p>
+                    </div>
+
+                    {/* Footer tags */}
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+                      <span className="text-slate-500 truncate max-w-[150px]">
+                        {vec.mitre}
+                      </span>
+                      {isSelected && (
+                        <span className="flex items-center gap-1 text-rose-400 font-bold">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Active</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Launch Button Action Bar */}
+          <div className="p-4 rounded-xl glass-panel border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/60">
+            <div className="flex items-center gap-3 text-xs text-slate-300">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+              <div>
+                Sẵn sàng phát sinh <strong className="text-white">{selectedVectorObj.name}</strong> ({liveAttempts} packets) tới <strong className="text-cyan-400 font-mono">{targetVmIp}:{targetPort || selectedVectorObj.defaultPort || 'ALL'}</strong>
+              </div>
             </div>
 
             <button
               onClick={handleLaunchLiveVmAttack}
               disabled={loading}
-              className="px-6 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-rose-600/30 transition"
+              className="w-full sm:w-auto px-7 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition disabled:opacity-50"
             >
-              <Flame className="w-4 h-4" />
-              <span>{loading ? 'Attacking VM...' : `Launch Attack (Fake Origin: ${spoofedAttackerIp})`}</span>
+              <Play className={`w-4 h-4 fill-white ${loading ? 'animate-spin' : ''}`} />
+              <span>{loading ? 'Đang gửi gói tin tấn công thật...' : `Khởi chạy Tấn công (${selectedVectorObj.name})`}</span>
             </button>
           </div>
 
-          {/* Live Attack Terminal Log Output */}
+          {/* Live Attack Output Terminal */}
           {liveAttackLogs && (
-            <div className="p-4 rounded-xl bg-slate-950 border border-rose-500/40 space-y-3 animate-in fade-in">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-rose-300 flex items-center gap-2">
+            <div className="glass-panel p-5 rounded-xl border border-rose-500/40 bg-slate-950/90 space-y-4 animate-fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-rose-400" />
-                  Live Attack Execution Results ({liveAttackLogs.attack_type.toUpperCase()}):
-                </span>
-                <div className="flex items-center gap-3">
-                  {liveAttackLogs.incident_id && (
-                    <button
-                      onClick={() => onSelectIncident(liveAttackLogs.incident_id)}
-                      className="text-[11px] font-bold text-cyan-300 hover:text-cyan-200 flex items-center gap-1"
-                    >
-                      <span>Investigate Incident #{liveAttackLogs.incident_id} &rarr;</span>
-                    </button>
-                  )}
-                  <span className="font-mono text-[10px] text-slate-400">Target: {liveAttackLogs.target_ip}</span>
+                  <span className="font-mono text-xs font-bold text-slate-200 uppercase">
+                    Real-Time Attack Terminal Output
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    Attack Dispatched
+                  </span>
                 </div>
+
+                {liveAttackLogs.incident_id && (
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => onSelectIncident && onSelectIncident(liveAttackLogs.incident_id)}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 transition"
+                    >
+                      <span>Xem Sự Cố #{liveAttackLogs.incident_id}</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                    {onGoApprovals && (
+                      <button
+                        onClick={onGoApprovals}
+                        className="px-3 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold transition"
+                      >
+                        Tới Hàng Đợi Phê Duyệt
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300 space-y-1 max-h-64 overflow-y-auto">
-                {liveAttackLogs.logs?.map((log, idx) => (
-                  <div 
-                    key={idx} 
+              {/* Logs Stream */}
+              <div className="bg-black/90 p-4 rounded-xl border border-slate-900 font-mono text-xs text-slate-300 max-h-72 overflow-y-auto space-y-1">
+                {liveAttackLogs.logs?.map((line, i) => (
+                  <div
+                    key={i}
                     className={
-                      log.startsWith('[+]') 
-                        ? 'text-emerald-400' 
-                        : log.startsWith('[!]') 
-                        ? 'text-amber-300' 
-                        : log.startsWith('[✓]')
-                        ? 'text-emerald-300 font-bold'
-                        : log.startsWith('[i]')
-                        ? 'text-cyan-300 font-semibold'
+                      line.includes('[+]') || line.includes('[✓]')
+                        ? 'text-emerald-400 font-semibold'
+                        : line.includes('[!]')
+                        ? 'text-rose-400'
+                        : line.includes('[i]')
+                        ? 'text-cyan-300 italic'
                         : 'text-slate-400'
                     }
                   >
-                    {log}
+                    {line}
                   </div>
                 ))}
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-1">
-                <button
-                  onClick={onGoApprovals}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition"
-                >
-                  <span>Go to Human Approvals (Block {spoofedAttackerIp}) &rarr;</span>
-                </button>
+              <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1">
+                <span>Trạng thái: <strong className="text-emerald-400">Thành công</strong> | Đã gắn danh tính IP giả lập: <strong className="text-amber-300 font-mono">{liveAttackLogs.spoofed_ip}</strong></span>
+                <span>Kiểm tra iptables máy ảo để xem rule chặn tự động kích hoạt</span>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* TAB 3: Custom JSON Webhook Tester */}
+      {/* TAB 2: CUSTOM JSON WEBHOOK INGESTION */}
       {activeTab === 'custom' && (
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
+          <div>
+            <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
               <FileCode className="w-4 h-4 text-cyan-400" />
-              Custom Webhook Payload Tester (POST /api/v1/alerts/webhook)
+              Custom Webhook Ingestion
             </h3>
-            <span className="text-xs text-slate-400 font-mono">Format: Wazuh, Suricata, or Generic JSON</span>
+            <p className="text-xs text-slate-400 mt-1">
+              Gửi một cảnh báo JSON thô mô phỏng log từ Wazuh, Suricata, AWS GuardDuty hoặc CrowdStrike để kiểm tra đường ống phân loại.
+            </p>
           </div>
 
-          <textarea
-            rows={8}
-            value={customJson}
-            onChange={(e) => setCustomJson(e.target.value)}
-            className="w-full p-4 rounded-xl bg-slate-900 border border-slate-700 font-mono text-xs text-cyan-300 focus:outline-none focus:border-cyan-500 leading-relaxed"
-          />
+          <div className="space-y-2">
+            <label className="text-xs font-mono text-slate-400">JSON Payload Content:</label>
+            <textarea
+              rows={9}
+              value={customJson}
+              onChange={(e) => setCustomJson(e.target.value)}
+              className="w-full p-3.5 rounded-xl bg-black/80 border border-slate-700 font-mono text-xs text-emerald-400 focus:outline-none focus:border-cyan-500 leading-relaxed"
+            />
+          </div>
 
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-slate-500 font-mono">Endpoint: POST /api/v1/alerts/webhook</span>
             <button
               onClick={handleSendCustom}
               disabled={loading}
-              className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-cyan-500/20 transition"
+              className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-cyan-500/20"
             >
               <Send className="w-4 h-4" />
-              <span>{loading ? 'Sending...' : 'Send Alert Payload'}</span>
+              <span>{loading ? 'Đang gửi...' : 'Gửi Cảnh Báo Tuỳ Chỉnh'}</span>
             </button>
           </div>
-        </div>
-      )}
 
-      {/* Simulation Results Output */}
-      {simulationResult && (
-        <div className="glass-panel p-6 rounded-xl border border-emerald-500/40 bg-emerald-950/10 space-y-4 animate-in fade-in zoom-in-95">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-              <CheckCircle2 className="w-5 h-5" />
-              <span>Simulation Ingested & Playbook Triggered Successfully!</span>
+          {customResult && (
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-xs">
+              <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Cảnh báo đã được tiếp nhận thành công!</span>
+              </div>
+              <div className="text-slate-300 font-mono">
+                Incident ID: <strong>#{customResult.incident_id}</strong> | Alert ID: <strong>#{customResult.id}</strong> | Status: <strong>{customResult.status}</strong>
+              </div>
+              {onSelectIncident && (
+                <button
+                  onClick={() => onSelectIncident(customResult.incident_id)}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold pt-1"
+                >
+                  <span>Chuyển tới chi tiết Sự cố #{customResult.incident_id}</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
-            <span className="text-xs font-mono text-slate-400">
-              Alert ID: <strong className="text-slate-200">{simulationResult.alert_id}</strong>
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-slate-400">Incident Associated:</div>
-              <div className="font-bold text-cyan-400 mt-0.5">#{simulationResult.incident_id || 'Auto-created'}</div>
-            </div>
-
-            <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-slate-400">Severity:</div>
-              <div className="font-bold text-orange-400 mt-0.5 uppercase">{simulationResult.severity}</div>
-            </div>
-
-            <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-              <div className="text-slate-400">Source Entity:</div>
-              <div className="font-bold text-slate-200 mt-0.5 truncate">{simulationResult.source_ip || simulationResult.hostname || 'N/A'}</div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-2">
-            {simulationResult.incident_id && (
-              <button
-                onClick={() => onSelectIncident(simulationResult.incident_id)}
-                className="px-4 py-2 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-200 border border-indigo-500/40 text-xs font-semibold flex items-center gap-1.5 transition"
-              >
-                <span>Investigate Incident #{simulationResult.incident_id}</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            )}
-
-            <button
-              onClick={onGoApprovals}
-              className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition"
-            >
-              <span>Check Pending Approvals Queue &rarr;</span>
-            </button>
-          </div>
+          )}
         </div>
       )}
     </div>
