@@ -40,7 +40,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1110.001 (Password Guessing)',
       severity: 'HIGH',
       badge: 'Kernel Auth Failures',
-      icon: Terminal,
       color: 'rose',
       description: 'Gửi liên tục các gói tin xác thực SSH với từ điển tài khoản (admin, root, kali_guest, devops...) ghi log thất bại thực tế vào /var/log/auth.log trên máy ảo.'
     },
@@ -52,7 +51,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1059.004 (Unix Shell Command Injection)',
       severity: 'CRITICAL',
       badge: 'Critical Exploit Payload',
-      icon: Zap,
       color: 'rose',
       description: 'Bắn chuỗi khai thác Remote Code Execution (id;whoami;cat /etc/passwd), Shellshock CVE-2014-6271 và Log4Shell JNDI injection (${jndi:ldap://...}).'
     },
@@ -64,7 +62,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1190 (Exploit Public-Facing App)',
       severity: 'HIGH',
       badge: 'SQLi & LFI Payloads',
-      icon: ShieldAlert,
       color: 'amber',
       description: 'Fuzzing các chuỗi SQLi UNION SELECT, OR 1=1 và Directory Traversal (../../../../etc/passwd, .env, wp-config) kèm header X-Forwarded-For giả lập.'
     },
@@ -76,7 +73,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1046 (Network Service Discovery)',
       severity: 'MEDIUM',
       badge: 'Reconnaissance Sweep',
-      icon: Radio,
       color: 'cyan',
       description: 'Quét thăm dò 16 cổng dịch vụ phổ biến (SSH 22, Web 80/443, SMB 445, MySQL 3306, RDP 3389, Wazuh 55000, Elastic 9200) để lập bản đồ mạng mục tiêu.'
     },
@@ -88,7 +84,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1498.001 (Direct Network Flood)',
       severity: 'HIGH',
       badge: 'Denial of Service',
-      icon: Flame,
       color: 'orange',
       description: 'Mở đồng thời nhiều kết nối HTTP socket dở dang và gửi header chậm từng phần nhằm làm cạn kiệt tài nguyên xử lý của web server trên máy ảo.'
     },
@@ -100,7 +95,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1110.004 (Credential Stuffing)',
       severity: 'HIGH',
       badge: 'Service Auth Flood',
-      icon: Lock,
       color: 'yellow',
       description: 'Kết nối socket trực tiếp tới cổng dịch vụ FTP/Telnet trên máy ảo, thử xác thực anonymous, root:toor, admin:admin123 để kích hoạt quy tắc Wazuh 11100.'
     },
@@ -112,7 +106,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1078.001 (Default Accounts)',
       severity: 'HIGH',
       badge: 'Lateral Movement Probe',
-      icon: Server,
       color: 'indigo',
       description: 'Gửi gói tin thương lượng SMB Negotiate Protocol Packet để kiểm tra Samba share và cố gắng kết nối phiên làm việc ẩn danh (Null Session).'
     },
@@ -124,7 +117,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       mitre: 'T1498.002 (Reflection Amplification)',
       severity: 'MEDIUM',
       badge: 'UDP Flood Traffic',
-      icon: Globe,
       color: 'teal',
       description: 'Bắn các gói tin UDP phân giải DNS ANY và NTP monlist để kiểm tra lưu lượng UDP xâm nhập và kích hoạt phát hiện Suricata IDS Rule 514.'
     },
@@ -327,7 +319,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
               {ATTACK_VECTORS.map((vec) => {
-                const Icon = vec.icon;
                 const isSelected = selectedVector === vec.id;
 
                 return (
