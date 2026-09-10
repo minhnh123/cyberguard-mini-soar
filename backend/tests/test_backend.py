@@ -316,3 +316,99 @@ async def test_firewall_rules_inspection():
         assert "status" in data_win
         assert "rules" in data_win
         assert isinstance(data_win["rules"], list)
+
+@pytest.mark.asyncio
+async def test_identity_connector_actions_and_rollback():
+    """
+    Test Enterprise Identity connector: session revocation, account disable, and rollback enable.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Revoke active user sessions
+        revoke_resp = await client.post(
+            "/api/v1/connectors/identity/action",
+            json={
+                "action_type": "revoke_user_sessions",
+                "target": "alex.morgan@cyberguard.corp",
+                "parameters": {"user_id": "alex.morgan@cyberguard.corp"}
+            }
+        )
+        assert revoke_resp.status_code == 200
+        revoke_data = revoke_resp.json()
+        assert revoke_data["status"] == "success"
+        assert "alex.morgan@cyberguard.corp" in revoke_data["message"]
+
+        # 2. Disable user account
+        disable_resp = await client.post(
+            "/api/v1/connectors/identity/action",
+            json={
+                "action_type": "disable_user_account",
+                "target": "alex.morgan@cyberguard.corp",
+                "parameters": {"user_id": "alex.morgan@cyberguard.corp"}
+            }
+        )
+        assert disable_resp.status_code == 200
+        disable_data = disable_resp.json()
+        assert disable_data["status"] == "success"
+
+        # 3. Rollback: Enable user account
+        enable_resp = await client.post(
+            "/api/v1/connectors/identity/action",
+            json={
+                "action_type": "enable_user_account",
+                "target": "alex.morgan@cyberguard.corp",
+                "parameters": {"user_id": "alex.morgan@cyberguard.corp"}
+            }
+        )
+        assert enable_resp.status_code == 200
+        enable_data = enable_resp.json()
+        assert enable_data["status"] == "success"
+
+@pytest.mark.asyncio
+async def test_edr_connector_actions_and_rollback():
+    """
+    Test Enterprise EDR connector: host isolation, kill process, and rollback reconnect.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Isolate endpoint
+        iso_resp = await client.post(
+            "/api/v1/connectors/edr/action",
+            json={
+                "action_type": "isolate_endpoint",
+                "target": "SRV-FINANCE-01",
+                "parameters": {"host": "SRV-FINANCE-01"}
+            }
+        )
+        assert iso_resp.status_code == 200
+        iso_data = iso_resp.json()
+        assert iso_data["status"] == "success"
+        assert iso_data.get("details", {}).get("isolation_status") == "ISOLATED"
+
+        # 2. Kill malicious process by PID
+        kill_resp = await client.post(
+            "/api/v1/connectors/edr/action",
+            json={
+                "action_type": "kill_process",
+                "target": "SRV-FINANCE-01",
+                "parameters": {"pid": "4821", "process_name": "vssadmin.exe", "host": "SRV-FINANCE-01"}
+            }
+        )
+        assert kill_resp.status_code == 200
+        kill_data = kill_resp.json()
+        assert kill_data["status"] == "success"
+        assert kill_data.get("details", {}).get("terminated_pid") == "4821"
+
+        # 3. Rollback: Reconnect endpoint
+        recon_resp = await client.post(
+            "/api/v1/connectors/edr/action",
+            json={
+                "action_type": "reconnect_endpoint",
+                "target": "SRV-FINANCE-01",
+                "parameters": {"host": "SRV-FINANCE-01"}
+            }
+        )
+        assert recon_resp.status_code == 200
+        recon_data = recon_resp.json()
+        assert recon_data["status"] == "success"
+        assert recon_data.get("details", {}).get("isolation_status") == "CONNECTED"

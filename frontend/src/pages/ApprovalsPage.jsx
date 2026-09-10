@@ -17,7 +17,9 @@ import {
   Eye,
   Check,
   Copy,
-  X
+  X,
+  UserCheck,
+  Cpu
 } from 'lucide-react';
 import { ApprovalsAPI, ConnectorsAPI } from '../services/api';
 import { formatLocalTime } from '../utils/date';
@@ -174,6 +176,8 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
       case 'windows_firewall': return <Terminal className="w-4 h-4 text-cyan-400" />;
       case 'wazuh': return <Lock className="w-4 h-4 text-rose-400" />;
       case 'cloudflare': return <Globe className="w-4 h-4 text-orange-400" />;
+      case 'identity': return <UserCheck className="w-4 h-4 text-purple-400" />;
+      case 'edr': return <Cpu className="w-4 h-4 text-amber-400" />;
       default: return <Flame className="w-4 h-4 text-amber-400" />;
     }
   };
@@ -459,14 +463,25 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                     <button
                       onClick={() => {
                         setShowRollbackConfirmId(appr.id);
+                        const defaultNote = appr.connector === 'identity'
+                          ? `Khôi phục tài khoản User ${appr.target}`
+                          : appr.connector === 'edr'
+                          ? `Khôi phục kết nối mạng cho máy ${appr.target}`
+                          : `Hoàn tác gỡ chặn IP ${appr.target} trên ${appr.connector}`;
                         setRollbackNotes({
                           ...rollbackNotes,
-                          [appr.id]: `Hoàn tác gỡ chặn IP ${appr.target} trên ${appr.connector}`
+                          [appr.id]: defaultNote
                         });
                       }}
                       className="px-3.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition hover:border-amber-400/60"
                     >
-                      <span>Hoàn tác / Gỡ chặn IP ({appr.target})</span>
+                      <span>
+                        {appr.connector === 'identity'
+                          ? `Khôi phục tài khoản User (${appr.target})`
+                          : appr.connector === 'edr'
+                          ? `Gỡ cô lập / Reconnect (${appr.target})`
+                          : `Hoàn tác / Gỡ chặn IP (${appr.target})`}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -475,7 +490,13 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
               {/* Status Note for Reverted Approvals */}
               {appr.status === 'reverted' && (
                 <div className="pt-2 border-t border-slate-800/80 text-xs text-purple-300 flex items-center justify-between">
-                  <span>Yêu cầu này đã được hoàn tác. Rule chặn trên <strong>{appr.connector}</strong> đã được gỡ bỏ an toàn.</span>
+                  <span>
+                    {appr.connector === 'identity'
+                      ? `Yêu cầu này đã được hoàn tác. Tài khoản ${appr.target} đã được kích hoạt lại.`
+                      : appr.connector === 'edr'
+                      ? `Yêu cầu này đã được hoàn tác. Máy trạm ${appr.target} đã được khôi phục kết nối mạng.`
+                      : `Yêu cầu này đã được hoàn tác. Rule chặn trên ${appr.connector} đã được gỡ bỏ an toàn.`}
+                  </span>
                   {appr.analyst_note?.includes("TTL Expired") && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold">
                       Auto-Rollback (TTL Expired)

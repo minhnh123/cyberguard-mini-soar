@@ -696,6 +696,25 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
 
         logs.append("[i] Expected Detection: Suricata Rule 514 (UDP Flood / Inbound DNS Reflection Traffic).")
 
+    # 9. Identity Compromise: Stolen Session Cookie & Credential Stuffing
+    elif attack_type == "identity_compromise":
+        logs.append(f"[*] Simulating Enterprise Identity Compromise for user 'alex.morgan@cyberguard.corp'...")
+        logs.append(f"[*] Originating IP: {spoofed_ip} (Anomalous geographic location / Tor Exit Node)")
+        logs.append(f"[*] Replaying stolen OAuth 2.0 refresh token & Bearer session cookie...")
+        await asyncio.sleep(0.3)
+        logs.append(f"[!] IdP Anomaly: Session established without primary MFA challenge (Session Hijack).")
+        logs.append(f"[i] Triggering Identity SOAR Playbook: OAuth Token Revocation & Account Suspension.")
+
+    # 10. Hostile Ransomware & EDR Process Neutralization
+    elif attack_type == "ransomware_execution":
+        logs.append(f"[*] Simulating Hostile Ransomware Execution on endpoint 'SRV-FINANCE-01'...")
+        logs.append(f"[*] Attacker origin: {spoofed_ip} executing command payload:")
+        logs.append(f"    vssadmin.exe delete shadows /all /quiet & bcdedit /set {{default}} recoveryenabled No")
+        logs.append(f"[*] Process Tree: powershell.exe (PID 2104) -> vssadmin.exe (PID 4821)")
+        await asyncio.sleep(0.3)
+        logs.append(f"[!] EDR Behavioral Sensor: Shadow copy deletion intercepted before mass encryption!")
+        logs.append(f"[i] Triggering EDR SOAR Playbook: Host Network Quarantine & Malicious PID Termination.")
+
     else:
         logs.append(f"[?] Unknown attack vector '{attack_type}'. Running generic connection test...")
         try:
@@ -764,6 +783,20 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
                 "severity": "medium",
                 "rule_id": "514",
                 "mitre": "T1498.002 (Reflection Amplification)"
+            },
+            "identity_compromise": {
+                "title": "Identity Compromise: Stolen Session Cookie & Unauthorized Admin Logon",
+                "source": "identity",
+                "severity": "high",
+                "rule_id": "10780",
+                "mitre": "T1078 (Valid Accounts) / T1539 (Steal Session Cookie)"
+            },
+            "ransomware_execution": {
+                "title": "Hostile Ransomware Execution & Volume Shadow Copies Tampering",
+                "source": "edr",
+                "severity": "critical",
+                "rule_id": "14860",
+                "mitre": "T1486 (Data Encrypted for Impact) / T1489 (Service Stop)"
             }
         }
 
@@ -784,6 +817,13 @@ async def live_attack_vm(payload: Dict[str, Any], db: AsyncSession = Depends(get
             "description": f"Live Red-Team attack vector '{attack_type}' executed against target VM {target_ip} with spoofed threat actor origin {spoofed_ip}. Triggered MITRE technique {meta['mitre']}.",
             "rule_id": meta["rule_id"]
         }
+        if attack_type == "identity_compromise":
+            sim_payload["user"] = "alex.morgan@cyberguard.corp"
+            sim_payload["raw_payload"] = {"user": "alex.morgan@cyberguard.corp", "ip": spoofed_ip, "source": "okta"}
+        elif attack_type == "ransomware_execution":
+            sim_payload["hostname"] = "SRV-FINANCE-01"
+            sim_payload["raw_payload"] = {"process_name": "vssadmin.exe", "pid": "4821", "host": "SRV-FINANCE-01", "ip": spoofed_ip}
+
         created_alert = await process_alert_ingestion(sim_payload, db)
         incident_id = created_alert.incident_id
         is_correlated = (created_alert.status == "correlated")

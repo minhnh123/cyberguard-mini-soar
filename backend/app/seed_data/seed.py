@@ -184,17 +184,138 @@ workflow:
     action: cloudflare_block
     connectors: [cloudflare]
 """
+    },
+    {
+        "name": "Enterprise Identity Compromise & Token Revocation",
+        "description": "Detects credential stuffing, stolen session tokens, or anomalous privilege escalation, validates user identity in IdP, and revokes active OAuth/SAML sessions.",
+        "category": "identity",
+        "is_active": True,
+        "trigger_conditions": {
+            "severity": ["high", "critical"],
+            "sources": ["okta", "azure_ad", "wazuh", "webhook", "identity"]
+        },
+        "graph_data": {
+            "nodes": [
+                {
+                    "id": "node_1",
+                    "type": "trigger",
+                    "position": {"x": 50, "y": 150},
+                    "data": {"label": "Identity Anomaly Alert", "icon": "UserCheck", "description": "Triggered by credential stuffing or stolen session token"}
+                },
+                {
+                    "id": "node_2",
+                    "type": "enrichment",
+                    "position": {"x": 300, "y": 150},
+                    "data": {"label": "IdP User & Session Enrichment", "icon": "Search", "description": "Queries Okta/Entra ID for user groups, MFA status & active sessions"}
+                },
+                {
+                    "id": "node_3",
+                    "type": "ai_triage",
+                    "position": {"x": 550, "y": 150},
+                    "data": {"label": "AI Credential Risk Assessment", "icon": "Brain", "description": "Maps to MITRE T1078, calculates blast radius, suggests session termination"}
+                },
+                {
+                    "id": "node_4",
+                    "type": "human_approval",
+                    "position": {"x": 800, "y": 150},
+                    "data": {"label": "Revoke Sessions & Suspend Account", "icon": "UserX", "description": "Analyst approval to revoke all active tokens & suspend user in IdP"}
+                }
+            ],
+            "edges": [
+                {"id": "e1-2", "source": "node_1", "target": "node_2"},
+                {"id": "e2-3", "source": "node_2", "target": "node_3"},
+                {"id": "e3-4", "source": "node_3", "target": "node_4"}
+            ]
+        },
+        "yaml_definition": """name: Enterprise Identity Compromise & Token Revocation
+category: identity
+triggers:
+  severity: [high, critical]
+workflow:
+  - step: trigger
+    type: alert_ingestion
+  - step: enrich
+    type: idp_user_lookup
+  - step: ai_analysis
+    type: ai_triage
+    mitre_focus: [T1078, T1539]
+  - step: approval_gate
+    type: human_approval
+    action: revoke_user_sessions
+    connectors: [identity]
+"""
+    },
+    {
+        "name": "Hostile Ransomware & EDR Process Neutralization",
+        "description": "Detects shadow copy deletion (vssadmin), mass file entropy changes, or malicious ransomware executables, isolates endpoint network, and terminates malicious PID.",
+        "category": "edr",
+        "is_active": True,
+        "trigger_conditions": {
+            "severity": ["critical"],
+            "sources": ["edr", "wazuh", "crowdstrike", "webhook"]
+        },
+        "graph_data": {
+            "nodes": [
+                {
+                    "id": "node_1",
+                    "type": "trigger",
+                    "position": {"x": 50, "y": 150},
+                    "data": {"label": "EDR Ransomware Detection", "icon": "AlertTriangle", "description": "Triggered by vssadmin deletion or rapid file encryption"}
+                },
+                {
+                    "id": "node_2",
+                    "type": "enrichment",
+                    "position": {"x": 300, "y": 150},
+                    "data": {"label": "Process Tree & PID Analysis", "icon": "Cpu", "description": "Extracts malicious PID, parent process, and file hash reputation"}
+                },
+                {
+                    "id": "node_3",
+                    "type": "ai_triage",
+                    "position": {"x": 550, "y": 150},
+                    "data": {"label": "AI Ransomware Threat Verification", "icon": "Brain", "description": "Maps to MITRE T1486 & T1489, calculates endpoint damage risk"}
+                },
+                {
+                    "id": "node_4",
+                    "type": "human_approval",
+                    "position": {"x": 800, "y": 150},
+                    "data": {"label": "EDR Endpoint Isolation & Kill PID", "icon": "ShieldAlert", "description": "Analyst approval to isolate endpoint & terminate malicious process"}
+                }
+            ],
+            "edges": [
+                {"id": "e1-2", "source": "node_1", "target": "node_2"},
+                {"id": "e2-3", "source": "node_2", "target": "node_3"},
+                {"id": "e3-4", "source": "node_3", "target": "node_4"}
+            ]
+        },
+        "yaml_definition": """name: Hostile Ransomware & EDR Process Neutralization
+category: edr
+triggers:
+  severity: [critical]
+workflow:
+  - step: trigger
+    type: alert_ingestion
+  - step: enrich
+    type: process_tree_lookup
+  - step: ai_analysis
+    type: ai_triage
+    mitre_focus: [T1486, T1489]
+  - step: approval_gate
+    type: human_approval
+    action: isolate_endpoint
+    connectors: [edr]
+"""
     }
 ]
 
 async def seed_database():
     async with AsyncSessionLocal() as session:
-        # 1. Seed initial playbooks if empty
+        # Seed initial playbooks if missing
         result = await session.execute(select(Playbook))
         existing = result.scalars().all()
-        if not existing:
-            print("[Seed] Populating default production Playbooks...")
-            for pb_data in INITIAL_PLAYBOOKS:
+        existing_names = {p.name for p in existing}
+        added = False
+        for pb_data in INITIAL_PLAYBOOKS:
+            if pb_data["name"] not in existing_names:
                 pb = Playbook(
                     name=pb_data["name"],
                     description=pb_data["description"],
@@ -205,5 +326,7 @@ async def seed_database():
                     yaml_definition=pb_data["yaml_definition"]
                 )
                 session.add(pb)
+                added = True
+        if added:
             await session.commit()
-            print("[Seed] Playbooks seeded successfully.")
+            print("[Seed] Playbooks synchronized successfully.")

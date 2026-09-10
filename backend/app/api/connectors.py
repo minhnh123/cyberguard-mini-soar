@@ -13,9 +13,19 @@ from app.services.websocket_manager import ws_manager
 router = APIRouter(prefix="/connectors", tags=["Connectors"])
 
 class TestConnectorRequest(BaseModel):
-    connector: str  # windows_firewall, linux_ssh, cloudflare, wazuh, webhook
+    connector: str  # windows_firewall, linux_ssh, cloudflare, wazuh, webhook, identity, edr
     action_type: str = "test"
     target: str
+    parameters: Dict[str, Any] = {}
+
+class IdentityActionRequest(BaseModel):
+    action_type: str = "revoke_user_sessions"  # revoke_user_sessions, disable_user_account, force_password_reset, enable_user_account
+    target: str  # user email or ID (e.g. alex.morgan@cyberguard.corp)
+    parameters: Dict[str, Any] = {}
+
+class EdrActionRequest(BaseModel):
+    action_type: str = "isolate_endpoint"  # isolate_endpoint, reconnect_endpoint, kill_process, quarantine_file
+    target: str  # host ID or hostname (e.g. AGENT-004, SRV-FINANCE-01)
     parameters: Dict[str, Any] = {}
 
 class WazuhScanRequest(BaseModel):
@@ -38,6 +48,40 @@ async def test_connector_action(payload: TestConnectorRequest, db: AsyncSession 
         db=db
     )
     return result
+
+@router.post("/identity/action")
+async def trigger_identity_action(
+    payload: IdentityActionRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Trigger an Identity Provider action (revoke sessions, suspend account, force password reset)
+    with safety guardrails enforcement and live/enterprise simulation dispatch.
+    """
+    return await ResponseService.execute_action(
+        connector="identity",
+        action_type=payload.action_type,
+        target=payload.target,
+        parameters=payload.parameters,
+        db=db
+    )
+
+@router.post("/edr/action")
+async def trigger_edr_action(
+    payload: EdrActionRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Trigger an EDR controller action (isolate endpoint, kill process, quarantine file)
+    with safety guardrails enforcement and live/enterprise simulation dispatch.
+    """
+    return await ResponseService.execute_action(
+        connector="edr",
+        action_type=payload.action_type,
+        target=payload.target,
+        parameters=payload.parameters,
+        db=db
+    )
 
 @router.get("/wazuh/agents")
 async def list_wazuh_agents(db: AsyncSession = Depends(get_db)):

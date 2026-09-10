@@ -30,8 +30,10 @@ async def check_and_rollback_expired_actions():
             
             for approval in expired_approvals:
                 rollback_action = "unblock_ip"
-                if approval.action_type in ["isolate_wazuh_agent", "isolate"]:
-                    rollback_action = "reconnect_wazuh_agent"
+                if approval.connector == "identity" or approval.action_type in ["disable_user_account", "suspend_user", "revoke_user_sessions"]:
+                    rollback_action = "enable_user_account"
+                elif approval.connector in ["edr", "wazuh_ar"] or approval.action_type in ["isolate_wazuh_agent", "isolate", "isolate_endpoint", "isolate_host"]:
+                    rollback_action = "reconnect_endpoint"
                     
                 # Execute rollback via ResponseService
                 exec_res = await ResponseService.execute_action(

@@ -121,6 +121,20 @@ export default function SettingsPage() {
       } else if (connector === 'cloudflare') {
         params = { token: formData['CLOUDFLARE_API_TOKEN'] || '' };
         target = '185.220.101.45';
+      } else if (connector === 'identity') {
+        target = 'alex.morgan@cyberguard.corp';
+        params = {
+          provider: formData['IDENTITY_PROVIDER'] || 'mock',
+          domain: formData['IDENTITY_DOMAIN'] || 'dev-cyberguard.okta.com',
+          token: formData['IDENTITY_API_TOKEN'] || ''
+        };
+      } else if (connector === 'edr') {
+        target = 'SRV-FINANCE-01';
+        params = {
+          provider: formData['EDR_PROVIDER'] || 'wazuh',
+          webhook_url: formData['EDR_WEBHOOK_URL'] || '',
+          api_key: formData['EDR_API_KEY'] || ''
+        };
       }
 
       const res = await ConnectorsAPI.test({
@@ -593,6 +607,141 @@ export default function SettingsPage() {
                 placeholder="Cloudflare API Token"
                 className="w-full px-2.5 py-1.5 rounded bg-slate-950 border border-slate-700 font-mono text-slate-200 text-[11px]"
               />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 4: ENTERPRISE IDENTITY & EDR CONNECTORS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Enterprise Identity Provider */}
+        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="text-sm font-bold text-purple-300">
+              Enterprise Identity Provider (IdP)
+            </div>
+            <button
+              type="button"
+              onClick={() => handleTestConnector('identity')}
+              disabled={testingConnector}
+              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 text-[11px]"
+            >
+              Test Identity API
+            </button>
+          </div>
+
+          <div className="text-xs space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">IdP Provider</label>
+                <select
+                  value={formData['IDENTITY_PROVIDER'] || 'mock'}
+                  onChange={(e) => handleChange('IDENTITY_PROVIDER', e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-purple-300 font-medium text-xs focus:outline-none focus:border-purple-500"
+                >
+                  <option value="mock">Lab Mock IdP (Simulation)</option>
+                  <option value="okta">Okta Workforce Identity</option>
+                  <option value="azure_ad">Microsoft Entra ID (Azure AD)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Tenant Domain</label>
+                <input
+                  type="text"
+                  value={formData['IDENTITY_DOMAIN'] || 'dev-cyberguard.okta.com'}
+                  onChange={(e) => handleChange('IDENTITY_DOMAIN', e.target.value)}
+                  placeholder="dev-company.okta.com"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-mono text-slate-200 text-xs focus:outline-none focus:border-purple-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">SSWS API Token / Client Secret</label>
+              <input
+                type="password"
+                value={formData['IDENTITY_API_TOKEN'] || ''}
+                onChange={(e) => handleChange('IDENTITY_API_TOKEN', e.target.value)}
+                placeholder="00abc... (Để trống nếu dùng Lab Simulation)"
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-mono text-slate-200 text-xs focus:outline-none focus:border-purple-500"
+              />
+            </div>
+
+            <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+              <div className="font-semibold text-slate-300">Supported Response Actions:</div>
+              <div className="font-mono text-[10px] text-purple-300 flex flex-wrap gap-1.5">
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30">revoke_user_sessions</span>
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30">disable_user_account</span>
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30">force_password_reset</span>
+                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30">enable_user_account (Rollback)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Enterprise EDR Controller */}
+        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+            <div className="text-sm font-bold text-amber-300">
+              EDR & Endpoint Response Controller
+            </div>
+            <button
+              type="button"
+              onClick={() => handleTestConnector('edr')}
+              disabled={testingConnector}
+              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-[11px]"
+            >
+              Test EDR Dispatch
+            </button>
+          </div>
+
+          <div className="text-xs space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">EDR Platform</label>
+                <select
+                  value={formData['EDR_PROVIDER'] || 'wazuh'}
+                  onChange={(e) => handleChange('EDR_PROVIDER', e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-medium text-xs focus:outline-none focus:border-amber-500"
+                >
+                  <option value="wazuh">Wazuh Active Response</option>
+                  <option value="crowdstrike">CrowdStrike Falcon Sensor</option>
+                  <option value="webhook">Generic EDR Webhook</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">EDR Webhook URL</label>
+                <input
+                  type="text"
+                  value={formData['EDR_WEBHOOK_URL'] || 'http://127.0.0.1:8000/api/v1/connectors/edr/webhook'}
+                  onChange={(e) => handleChange('EDR_WEBHOOK_URL', e.target.value)}
+                  placeholder="https://edr-controller.corp/api/v1/action"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-mono text-slate-200 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 font-semibold mb-1">EDR Controller API Key / Bearer</label>
+              <input
+                type="password"
+                value={formData['EDR_API_KEY'] || ''}
+                onChange={(e) => handleChange('EDR_API_KEY', e.target.value)}
+                placeholder="EDR Bearer Token (Để trống nếu dùng Wazuh/Lab Simulation)"
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 font-mono text-slate-200 text-xs focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+              <div className="font-semibold text-slate-300">Endpoint Response Capabilities:</div>
+              <div className="font-mono text-[10px] text-amber-300 flex flex-wrap gap-1.5">
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">isolate_endpoint</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">kill_process (PID)</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">quarantine_file</span>
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">reconnect_endpoint (Rollback)</span>
+              </div>
             </div>
           </div>
         </div>

@@ -3,19 +3,22 @@
 > **Dự án:** CyberGuard Mini SOAR – Nền tảng Điều phối, Tự động hóa và Phản hồi An ninh mạng tích hợp AI Tier-3 Triage & Wazuh SIEM  
 > **Thư mục làm việc:** `d:\soar`  
 > **Ngày cập nhật:** 2026-09-10  
-> **Trạng thái:** Hoàn thiện 100% (Backend Test 12/12 Passing, Frontend Build 0 Error - Tích hợp Safety Guardrails Blast Radius Mitigation & Auto-Rollback TTL Worker, WebSocket Real-time Alerting, Toast Notifications, Webhook Secret Auth & Input Sanitization)
+> **Trạng thái:** Hoàn thiện 100% (Backend Test 14/14 Passing, Frontend Build 0 Error - Đã tích hợp trọn vẹn Bước 1: Safety Guardrails & Auto-Rollback TTL Worker và Bước 2: Bổ sung 2 Connector tối quan trọng ngoài SSH: Enterprise Identity Provider & Central Webhook EDR)
 
 ---
 
 ## 1. TỔNG QUAN VÀ MỤC TIÊU CỐT LÕI (OVERVIEW & GOALS)
 
 1. **Giải quyết tình trạng Alert Fatigue & Deduplication:** Tự động hóa tiếp nhận hàng nghìn cảnh báo từ SIEM (Wazuh) và IDS (Suricata), gộp nhóm trùng lặp thông minh (Alert Deduplication), làm giàu dữ liệu đe dọa (Threat Intelligence), và lập chỉ mục sự cố an ninh trong thời gian $< 50\text{ ms}$.
-2. **AI Tier-3 Virtual SOC Analyst:** Sử dụng mô hình ngôn ngữ lớn (Google Gemini 1.5 Flash, GPT-4o, DeepSeek, Local Ollama) kết hợp Bộ quy tắc Chuyên gia SOC Heuristics nội bộ để viết Attack Narrative, RCA, ánh xạ MITRE ATT&CK (`T1110`, `T1190`, `T1486`), chấm điểm Confidence Score và False Positive Risk.
+2. **AI Tier-3 Virtual SOC Analyst:** Sử dụng mô hình ngôn ngữ lớn (Google Gemini 1.5 Flash, GPT-4o, DeepSeek, Local Ollama) kết hợp Bộ quy tắc Chuyên gia SOC Heuristics nội bộ để viết Attack Narrative, RCA, ánh xạ MITRE ATT&CK (`T1110`, `T1078`, `T1190`, `T1486`, `T1539`), chấm điểm Confidence Score và False Positive Risk.
 3. **Safety Guardrails & Blast Radius Mitigation (Bảo vệ Hạ tầng Trọng yếu):** Tự động từ chối bất kỳ hành vi chặn hoặc cô lập nào đối với các địa chỉ IP huyết mạch của mạng doanh nghiệp (`127.0.0.1`, `8.8.8.8`, `1.1.1.1`, Gateway `.1`, Host SOAR `192.168.56.1`, Broadcast `.255`), loại trừ hoàn toàn nguy cơ AI hoặc Analyst tự cô lập máy chủ điều hành.
-4. **Auto-Rollback TTL (Hẹn giờ gỡ chặn tự động):** Tiến trình nền (Background TTL Worker) theo dõi thời hạn khóa tạm thời (15m, 1h, 24h) và tự động unblock IP trên `iptables`/tường lửa khi hết hạn, phát sự kiện WebSocket real-time thông báo cho SOC Analyst.
-5. **Mô hình Phê duyệt An toàn (Human-in-the-Loop Gateway):** Playbook tự động điều phối dừng lại ở các bước can thiệp hạ tầng để chuyên viên SOC kiểm duyệt, chọn TTL và bấm **1-Click Approve & Execute** hoặc **Hoàn tác / Gỡ chặn IP**.
-6. **Thực thi trên Hạ tầng Mạng Thật (Live Remote Enforcement):** Kết nối SSH Paramiko từ máy chủ Windows sang máy ảo Kali Linux để chèn và tra cứu quy tắc `iptables` trực tiếp vào nhân Linux và điều khiển Wazuh REST API cổng 55000.
-7. **Phòng thí nghiệm Diễn tập Tấn công (Red-Team Attack Simulator):** Tích hợp 8 vector tấn công trực tiếp vào VM (SSH Brute Force, Web SQLi, UDP Flood, Port Scan, ICMP Flood, Web RCE, Brute Force Web Login) và giả lập danh tính IP độc hại quốc tế (*Spoofed Attacker Source IP*).
+4. **Auto-Rollback TTL (Hẹn giờ gỡ chặn tự động):** Tiến trình nền (Background TTL Worker) theo dõi thời hạn khóa tạm thời (15m, 1h, 24h) và tự động unblock IP/reconnect host trên `iptables`/tường lửa/EDR khi hết hạn, phát sự kiện WebSocket real-time thông báo cho SOC Analyst.
+5. **Đa dạng hóa Hệ thống Điều phối Phản hồi Ngoài SSH (Multi-Domain Connectors):**
+   - **Identity Provider Connector (`identity`):** Tích hợp Okta Workforce API, Microsoft Entra ID (Azure AD) và Enterprise Mock Simulation. Cung cấp các hành động tức thời: thu hồi toàn bộ token phiên làm việc (`revoke_user_sessions`), vô hiệu hóa tài khoản tạm thời (`disable_user_account`), yêu cầu đổi mật khẩu khẩn cấp (`force_password_reset`), và hoàn tác kích hoạt lại (`enable_user_account`).
+   - **Central EDR Controller (`edr`):** Tích hợp Wazuh Active Response REST API, CrowdStrike Falcon và EDR Webhook trung tâm. Cung cấp các hành động can thiệp mức kernel: cô lập máy trạm khỏi mạng (`isolate_endpoint`), tiêu diệt tiến trình độc hại theo PID (`kill_process`), đưa tệp tin mã độc vào kho lưu trữ cách ly (`quarantine_file`), và hoàn tác khôi phục mạng (`reconnect_endpoint`).
+6. **Mô hình Phê duyệt An toàn (Human-in-the-Loop Gateway):** Playbook tự động điều phối dừng lại ở các bước can thiệp hạ tầng để chuyên viên SOC kiểm duyệt, chọn TTL và bấm **1-Click Approve & Execute** hoặc **Hoàn tác / Rollback** chuyên biệt cho từng loại connector.
+7. **Thực thi trên Hạ tầng Mạng Thật & Enterprise Simulation:** Kết nối SSH Paramiko từ máy chủ Windows sang máy ảo Kali Linux để chèn và tra cứu quy tắc `iptables` trực tiếp vào nhân Linux, điều khiển Wazuh REST API cổng 55000, và fallback mô phỏng doanh nghiệp khi ở môi trường Lab.
+8. **Phòng thí nghiệm Diễn tập Tấn công (Red-Team Attack Simulator):** Tích hợp 10 vector tấn công trực tiếp vào VM và giả lập danh tính IP độc hại quốc tế (*Spoofed Attacker Source IP*), bao gồm cả Credential Stuffing & Stolen Session Cookie và Ransomware Shadow Copy Deletion (`vssadmin.exe`).
 
 ---
 

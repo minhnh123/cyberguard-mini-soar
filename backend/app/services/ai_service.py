@@ -25,9 +25,9 @@ You MUST reply with ONLY a valid JSON object strictly matching this schema:
   ],
   "recommended_actions": [
     {
-      "action_type": "block_ip" | "isolate_wazuh_agent" | "cloudflare_block" | "send_notification" | "custom_command",
-      "connector": "windows_firewall" | "linux_ssh" | "cloudflare" | "wazuh" | "webhook",
-      "target": "string (IP address, Agent ID, Hostname, etc.)",
+      "action_type": "block_ip" | "isolate_wazuh_agent" | "isolate_endpoint" | "kill_process" | "quarantine_file" | "revoke_user_sessions" | "disable_user_account" | "cloudflare_block" | "send_notification" | "custom_command",
+      "connector": "windows_firewall" | "linux_ssh" | "cloudflare" | "wazuh" | "webhook" | "identity" | "edr",
+      "target": "string (IP address, Agent ID, Hostname, User email, etc.)",
       "parameters": {},
       "reason": "Clear justification why this action is necessary",
       "risk_level": "low" | "medium" | "high"
@@ -280,21 +280,64 @@ Preliminary MITRE ATT&CK matches:
                     "risk_level": "low"
                 })
 
+        elif any(k in title for k in ["credential stuffing", "identity", "stolen token", "session hijack", "account takeover"]) or alert.get("source") in ["okta", "azure_ad", "identity"]:
+            severity = "high"
+            confidence = 0.95
+            user_target = alert.get("user") or alert.get("raw_payload", {}).get("user") or "alex.morgan@cyberguard.corp"
+            narrative = f"Detected anomalous identity activity / credential compromise targeting account '{user_target}'. Rogue session tokens or credential abuse detected."
+            root_cause = "Compromised OAuth/SAML token, session cookie theft, or unauthorized credential replay."
+            if not techniques:
+                techniques = [{"id": "T1078", "name": "Valid Accounts"}, {"id": "T1539", "name": "Steal Web Session Cookie"}]
+                tactics = ["Initial Access", "Credential Access", "Defense Evasion"]
+            recommended_actions.append({
+                "action_type": "revoke_user_sessions",
+                "connector": "identity",
+                "target": user_target,
+                "parameters": {"user_id": user_target, "revoke_tokens": True},
+                "reason": f"Revoke all active IdP session tokens and OAuth refresh grants for compromised user '{user_target}'.",
+                "risk_level": "medium"
+            })
+            recommended_actions.append({
+                "action_type": "disable_user_account",
+                "connector": "identity",
+                "target": user_target,
+                "parameters": {"user_id": user_target},
+                "reason": f"Temporarily suspend account '{user_target}' to prevent further unauthorized access.",
+                "risk_level": "high"
+            })
+
         elif "ransomware" in title or "shadow copy" in title or "encrypt" in title:
             severity = "critical"
             confidence = 0.99
-            narrative = f"Critical alert: Suspected ransomware behavior detected on host {alert.get('hostname', 'endpoint')}. Active defense evasion and potential volume shadow copy deletion identified."
-            root_cause = "Unauthorized script or malware attempting mass file modification and backup destruction."
+            host_target = alert.get("hostname") or str(agent_id) or "SRV-FINANCE-01"
+            narrative = f"Critical alert: Suspected ransomware behavior detected on host {host_target}. Active defense evasion and volume shadow copy tampering identified."
+            root_cause = "Unauthorized script or hostile binary attempting mass file modification and backup destruction."
             if not techniques:
-                techniques = [{"id": "T1486", "name": "Data Encrypted for Impact"}]
+                techniques = [{"id": "T1486", "name": "Data Encrypted for Impact"}, {"id": "T1489", "name": "Service Stop"}]
                 tactics = ["Impact", "Defense Evasion"]
+            recommended_actions.append({
+                "action_type": "isolate_endpoint",
+                "connector": "edr",
+                "target": host_target,
+                "parameters": {"host": host_target, "action": "isolate"},
+                "reason": f"Immediately isolate host '{host_target}' via EDR Controller to sever lateral movement and stop encryption propagation.",
+                "risk_level": "medium"
+            })
+            recommended_actions.append({
+                "action_type": "kill_process",
+                "connector": "edr",
+                "target": host_target,
+                "parameters": {"pid": "4821", "process_name": "vssadmin.exe", "host": host_target},
+                "reason": f"Kill malicious ransomware process tree (PID 4821 / vssadmin.exe) on endpoint '{host_target}'.",
+                "risk_level": "medium"
+            })
             if agent_id:
                 recommended_actions.append({
                     "action_type": "isolate_wazuh_agent",
                     "connector": "wazuh",
                     "target": str(agent_id),
                     "parameters": {"agent_id": str(agent_id), "command": "isolate"},
-                    "reason": f"Immediately isolate compromised endpoint (Agent ID: {agent_id}) to prevent lateral movement and ransomware spread.",
+                    "reason": f"Isolate Wazuh Agent ID {agent_id} via Active Response.",
                     "risk_level": "medium"
                 })
 

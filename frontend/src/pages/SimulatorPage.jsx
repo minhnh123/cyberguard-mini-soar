@@ -127,6 +127,28 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       icon: Globe,
       color: 'teal',
       description: 'Bắn các gói tin UDP phân giải DNS ANY và NTP monlist để kiểm tra lưu lượng UDP xâm nhập và kích hoạt phát hiện Suricata IDS Rule 514.'
+    },
+    {
+      id: 'identity_compromise',
+      name: 'Credential Stuffing & Stolen Session Cookie',
+      protocol: 'OAuth 2.0 / IdP SAML Token Replay',
+      defaultPort: 443,
+      mitre: 'T1078 (Valid Accounts) / T1539 (Steal Session Cookie)',
+      severity: 'HIGH',
+      badge: 'Identity Takeover',
+      color: 'purple',
+      description: 'Giả lập truy cập trái phép bằng Session Cookie bị đánh cắp của alex.morgan@cyberguard.corp từ IP Tor Exit Node. Kích hoạt Identity SOAR Revocation Playbook.'
+    },
+    {
+      id: 'ransomware_execution',
+      name: 'Ransomware Shadow Copy Deletion (vssadmin)',
+      protocol: 'Endpoint Process Tree / EDR Hook',
+      defaultPort: null,
+      mitre: 'T1486 (Data Encrypted) / T1489 (Service Stop)',
+      severity: 'CRITICAL',
+      badge: 'EDR Process Containment',
+      color: 'rose',
+      description: 'Kích hoạt tiến trình thực thi ransomware nguy hiểm (vssadmin.exe delete shadows /all /quiet) trên máy trạm tài chính (PID: 4821) để kích hoạt EDR Endpoint Quarantine.'
     }
   ];
 
