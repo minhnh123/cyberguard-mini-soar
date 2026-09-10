@@ -1,16 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  Search, 
-  Globe, 
-  ShieldCheck, 
-  ShieldAlert, 
-  FileCode, 
-  Activity, 
-  Server, 
-  MapPin, 
-  ExternalLink,
-  Zap
-} from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 import { ThreatIntelAPI } from '../services/api';
 
 export default function ThreatIntelPage() {
@@ -52,8 +41,7 @@ export default function ThreatIntelPage() {
       {/* Header Banner */}
       <div className="p-5 rounded-xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-slate-900 border border-cyan-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-cyan-200 flex items-center gap-2">
-            <Search className="w-5 h-5 text-cyan-400" />
+          <h2 className="text-base font-bold text-cyan-200">
             Threat Intelligence & IOC Scanner
           </h2>
           <p className="text-xs text-slate-400 mt-1">
@@ -106,9 +94,8 @@ export default function ThreatIntelPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full sm:w-auto px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 transition shrink-0"
+          className="w-full sm:w-auto px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 transition shrink-0"
         >
-          <Search className="w-4 h-4" />
           <span>{loading ? 'Scanning...' : 'Scan IOC'}</span>
         </button>
       </form>
@@ -128,8 +115,7 @@ export default function ThreatIntelPage() {
           {geoData && (
             <div className="glass-panel p-5 rounded-xl border border-slate-800 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-sm font-bold text-slate-100">
                   IP Geolocation & ISP
                 </h3>
                 {geoData.is_private ? (
@@ -171,8 +157,7 @@ export default function ThreatIntelPage() {
           {vtData && (
             <div className="glass-panel p-5 rounded-xl border border-slate-800 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-rose-400" />
+                <h3 className="text-sm font-bold text-slate-100">
                   VirusTotal Antivirus Engine Matrix
                 </h3>
                 <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded border font-bold ${

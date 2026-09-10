@@ -64,6 +64,17 @@ class ResponseService:
                     "message": f"Simulated unblock execution for connector '{connector}' targeting '{target}'."
                 }
 
+        # Check Safety Guardrails for restrictive containment actions
+        from app.services.guardrail_service import GuardrailService
+        safety_check = await GuardrailService.validate_action_safety(target, action_type, connector, db=db)
+        if not safety_check.get("allowed", True):
+            return {
+                "status": "failed",
+                "violation": True,
+                "mode": "guardrail_blocked",
+                "message": safety_check.get("reason", f"Action on {target} blocked by Safety Guardrails.")
+            }
+
         if connector == "windows_firewall":
             return await cls.block_ip_windows(target, parameters)
         elif connector == "linux_ssh":

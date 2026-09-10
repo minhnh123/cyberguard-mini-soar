@@ -1,22 +1,8 @@
 import React, { useState } from 'react';
 import { 
   Zap, 
-  Radio, 
-  Terminal, 
-  ShieldAlert, 
-  Send, 
   CheckCircle2, 
-  FileCode, 
-  ExternalLink, 
-  Flame, 
-  Lock, 
-  Server, 
-  Crosshair, 
-  Globe,
-  RotateCcw,
-  Check,
-  AlertTriangle,
-  Play
+  AlertTriangle
 } from 'lucide-react';
 import { AlertsAPI } from '../services/api';
 
@@ -191,8 +177,7 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
               Live Red-Team Lab
             </span>
           </div>
-          <h2 className="text-base font-bold text-rose-200 flex items-center gap-2 mt-1">
-            <Crosshair className="w-5 h-5 text-rose-400" />
+          <h2 className="text-base font-bold text-rose-200 mt-1">
             Live VM Attack Launcher & Threat Intel Simulator
           </h2>
           <p className="text-xs text-slate-400 mt-1">
@@ -204,25 +189,23 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
         <div className="flex rounded-lg bg-slate-900 p-1 border border-slate-800 text-xs shrink-0">
           <button
             onClick={() => setActiveTab('live_vm')}
-            className={`px-4 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
+            className={`px-4 py-1.5 rounded-md font-medium transition ${
               activeTab === 'live_vm'
                 ? 'bg-rose-600 text-white font-bold shadow-lg shadow-rose-600/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Crosshair className="w-3.5 h-3.5" />
-            <span>🔥 Live VM Attack</span>
+            <span>Live VM Attack</span>
           </button>
 
           <button
             onClick={() => setActiveTab('custom')}
-            className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-md font-medium transition ${
               activeTab === 'custom'
                 ? 'bg-cyan-500 text-slate-950 font-bold'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <FileCode className="w-3.5 h-3.5" />
             <span>Custom JSON Webhook</span>
           </button>
         </div>
@@ -234,8 +217,8 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
           {/* Attack Configuration Controls Panel */}
           <div className="glass-panel p-5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-              <h3 className="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider flex items-center gap-2">
-                <span>1. Cấu hình Mục tiêu & Danh tính Kẻ tấn công</span>
+              <h3 className="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider">
+                1. Cấu hình Mục tiêu & Danh tính Kẻ tấn công
               </h3>
               <span className="text-[11px] text-slate-400 font-mono">
                 Đích đến: <strong className="text-cyan-400">{targetVmIp}:{targetPort || selectedVectorObj.defaultPort || 'ALL'}</strong>
@@ -271,9 +254,8 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
 
               {/* Spoofed Attacker IP */}
               <div>
-                <label className="text-slate-300 font-semibold mb-1 block flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Spoofed Attacker Source IP</span>
+                <label className="text-slate-300 font-semibold mb-1 block">
+                  Spoofed Attacker Source IP
                 </label>
                 <select
                   value={spoofedAttackerIp}
@@ -313,8 +295,8 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
           {/* Attack Vectors Grid (8 Methods) */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider flex items-center gap-2">
-                <span>2. Chọn Phương thức Tấn công Thực tế ({ATTACK_VECTORS.length} Vectors)</span>
+              <h3 className="text-xs font-bold text-slate-200 uppercase font-mono tracking-wider">
+                2. Chọn Phương thức Tấn công Thực tế ({ATTACK_VECTORS.length} Vectors)
               </h3>
               <span className="text-xs text-slate-400">
                 Đang chọn: <strong className="text-rose-400 font-semibold">{selectedVectorObj.name}</strong>
@@ -344,9 +326,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
                     {/* Header */}
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-rose-500/20 text-rose-300' : 'bg-slate-900 text-slate-400'}`}>
-                          <Icon className="w-4 h-4" />
-                        </div>
                         <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase border ${
                           vec.severity === 'CRITICAL'
                             ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
@@ -356,15 +335,14 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
                         }`}>
                           {vec.severity}
                         </span>
+                        <span className="text-[11px] font-mono text-cyan-400">
+                          {vec.protocol}
+                        </span>
                       </div>
 
                       <h4 className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : 'text-slate-200'}`}>
                         {vec.name}
                       </h4>
-
-                      <div className="text-[11px] font-mono text-cyan-400">
-                        {vec.protocol}
-                      </div>
 
                       <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-3">
                         {vec.description}
@@ -377,9 +355,8 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
                         {vec.mitre}
                       </span>
                       {isSelected && (
-                        <span className="flex items-center gap-1 text-rose-400 font-bold">
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Active</span>
+                        <span className="text-rose-400 font-bold">
+                          Active
                         </span>
                       )}
                     </div>
@@ -401,9 +378,8 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
             <button
               onClick={handleLaunchLiveVmAttack}
               disabled={loading}
-              className="w-full sm:w-auto px-7 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition disabled:opacity-50"
+              className="w-full sm:w-auto px-7 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 transition disabled:opacity-50"
             >
-              <Play className={`w-4 h-4 fill-white ${loading ? 'animate-spin' : ''}`} />
               <span>{loading ? 'Đang gửi gói tin tấn công thật...' : `Khởi chạy Tấn công (${selectedVectorObj.name})`}</span>
             </button>
           </div>
@@ -413,7 +389,6 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
             <div className="glass-panel p-5 rounded-xl border border-rose-500/40 bg-slate-950/90 space-y-4 animate-fade-in">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-rose-400" />
                   <span className="font-mono text-xs font-bold text-slate-200 uppercase">
                     Real-Time Attack Terminal Output
                   </span>
@@ -426,10 +401,9 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => onSelectIncident && onSelectIncident(liveAttackLogs.incident_id)}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 transition"
+                      className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold transition"
                     >
                       <span>Xem Sự Cố #{liveAttackLogs.incident_id}</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
                     </button>
                     {onGoApprovals && (
                       <button
@@ -502,8 +476,7 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
       {activeTab === 'custom' && (
         <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
           <div>
-            <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-              <FileCode className="w-4 h-4 text-cyan-400" />
+            <h3 className="font-bold text-sm text-slate-100">
               Custom Webhook Ingestion
             </h3>
             <p className="text-xs text-slate-400 mt-1">
@@ -526,9 +499,8 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
             <button
               onClick={handleSendCustom}
               disabled={loading}
-              className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-2 transition shadow-lg shadow-cyan-500/20"
+              className="px-6 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition shadow-lg shadow-cyan-500/20"
             >
-              <Send className="w-4 h-4" />
               <span>{loading ? 'Đang gửi...' : 'Gửi Cảnh Báo Tuỳ Chỉnh'}</span>
             </button>
           </div>
@@ -545,10 +517,9 @@ export default function SimulatorPage({ onSelectIncident, onGoApprovals }) {
               {onSelectIncident && (
                 <button
                   onClick={() => onSelectIncident(customResult.incident_id)}
-                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold pt-1"
+                  className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold pt-1 transition"
                 >
                   <span>Chuyển tới chi tiết Sự cố #{customResult.incident_id}</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>

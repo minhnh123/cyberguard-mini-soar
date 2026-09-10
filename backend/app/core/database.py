@@ -29,8 +29,19 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        try:
-            from sqlalchemy import text
-            await conn.execute(text("ALTER TABLE incidents ADD COLUMN alert_count INTEGER DEFAULT 1"))
-        except Exception:
-            pass
+        from sqlalchemy import text
+        migrations = [
+            "ALTER TABLE incidents ADD COLUMN alert_count INTEGER DEFAULT 1",
+            "ALTER TABLE pending_approvals ADD COLUMN ttl_minutes INTEGER DEFAULT 60",
+            "ALTER TABLE pending_approvals ADD COLUMN expires_at DATETIME",
+            "ALTER TABLE pending_approvals ADD COLUMN is_expired BOOLEAN DEFAULT 0",
+            "ALTER TABLE action_logs ADD COLUMN ttl_minutes INTEGER",
+            "ALTER TABLE action_logs ADD COLUMN expires_at DATETIME",
+            "ALTER TABLE action_logs ADD COLUMN is_expired BOOLEAN DEFAULT 0",
+            "ALTER TABLE action_logs ADD COLUMN rollback_status VARCHAR(32)"
+        ]
+        for m in migrations:
+            try:
+                await conn.execute(text(m))
+            except Exception:
+                pass

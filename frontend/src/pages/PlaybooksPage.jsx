@@ -231,8 +231,7 @@ export default function PlaybooksPage() {
       {/* Top Banner */}
       <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <Workflow className="w-5 h-5 text-cyan-400" />
+          <h2 className="text-base font-bold text-slate-100">
             Visual Playbook Builder & DAG Orchestrator
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -243,18 +242,16 @@ export default function PlaybooksPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleCreateNew}
-            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-semibold flex items-center gap-1.5 transition"
+            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-semibold transition"
           >
-            <Plus className="w-4 h-4" />
             <span>New Playbook</span>
           </button>
 
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20 transition"
+            className="px-4 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold shadow-lg shadow-cyan-500/20 transition"
           >
-            <Save className="w-4 h-4" />
             <span>{saving ? 'Saving...' : 'Save Playbook'}</span>
           </button>
         </div>
@@ -302,34 +299,30 @@ export default function PlaybooksPage() {
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 onClick={() => handleAddNode('enrichment', 'Threat Intel Lookup', 'Query IP-API / VirusTotal')}
-                className="p-1.5 rounded bg-slate-800 hover:bg-cyan-950/60 hover:text-cyan-300 border border-slate-700 text-[11px] text-left transition flex items-center gap-1"
+                className="p-1.5 rounded bg-slate-800 hover:bg-cyan-950/60 hover:text-cyan-300 border border-slate-700 text-[11px] text-center font-medium transition"
               >
-                <Globe className="w-3 h-3 text-cyan-400" />
-                <span>Enrich Intel</span>
+                Enrich Intel
               </button>
 
               <button
                 onClick={() => handleAddNode('ai_triage', 'AI Triage & MITRE', 'Analyze severity & tactics')}
-                className="p-1.5 rounded bg-slate-800 hover:bg-indigo-950/60 hover:text-indigo-300 border border-slate-700 text-[11px] text-left transition flex items-center gap-1"
+                className="p-1.5 rounded bg-slate-800 hover:bg-indigo-950/60 hover:text-indigo-300 border border-slate-700 text-[11px] text-center font-medium transition"
               >
-                <Brain className="w-3 h-3 text-indigo-400" />
-                <span>AI Reasoner</span>
+                AI Reasoner
               </button>
 
               <button
                 onClick={() => handleAddNode('human_approval', 'Approval Gateway', 'Analyst 1-click verify')}
-                className="p-1.5 rounded bg-slate-800 hover:bg-amber-950/60 hover:text-amber-300 border border-slate-700 text-[11px] text-left transition flex items-center gap-1"
+                className="p-1.5 rounded bg-slate-800 hover:bg-amber-950/60 hover:text-amber-300 border border-slate-700 text-[11px] text-center font-medium transition"
               >
-                <CheckCircle2 className="w-3 h-3 text-amber-400" />
-                <span>Approval Gate</span>
+                Approval Gate
               </button>
 
               <button
                 onClick={() => handleAddNode('response_action', 'Firewall Block', 'Execute netsh / iptables rule')}
-                className="p-1.5 rounded bg-slate-800 hover:bg-emerald-950/60 hover:text-emerald-300 border border-slate-700 text-[11px] text-left transition flex items-center gap-1"
+                className="p-1.5 rounded bg-slate-800 hover:bg-emerald-950/60 hover:text-emerald-300 border border-slate-700 text-[11px] text-center font-medium transition"
               >
-                <Terminal className="w-3 h-3 text-emerald-400" />
-                <span>Action Exec</span>
+                Action Exec
               </button>
             </div>
           </div>

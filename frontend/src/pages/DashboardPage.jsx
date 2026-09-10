@@ -65,9 +65,8 @@ export default function DashboardPage({ onSelectIncident, onGoApprovals, onOpenS
         </div>
         <button
           onClick={onOpenSimulator}
-          className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs transition flex items-center gap-1.5 shrink-0 shadow-lg shadow-cyan-500/20"
+          className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold text-xs transition shrink-0 shadow-lg shadow-cyan-500/20"
         >
-          <Zap className="w-4 h-4" />
           <span>Launch Attack Simulator</span>
         </button>
       </div>
@@ -171,8 +170,7 @@ export default function DashboardPage({ onSelectIncident, onGoApprovals, onOpenS
         <div className="lg:col-span-2 glass-panel p-5 rounded-xl border border-slate-800 flex flex-col">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-cyan-400" />
+              <h2 className="text-sm font-bold text-slate-100">
                 Active Security Incidents (AI Triaged)
               </h2>
               <p className="text-xs text-slate-400">Correlated incidents with confidence scoring & MITRE tactics</p>
@@ -237,8 +235,7 @@ export default function DashboardPage({ onSelectIncident, onGoApprovals, onOpenS
         <div className="space-y-6">
           {/* Top Hostile Source IPs */}
           <div className="glass-panel p-5 rounded-xl border border-slate-800">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
-              <Globe className="w-3.5 h-3.5 text-cyan-400" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
               Top Hostile Source IPs
             </h3>
             <div className="space-y-2">

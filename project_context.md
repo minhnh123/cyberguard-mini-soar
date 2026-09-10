@@ -2,22 +2,20 @@
 
 > **Dự án:** CyberGuard Mini SOAR – Nền tảng Điều phối, Tự động hóa và Phản hồi An ninh mạng tích hợp AI Tier-3 Triage & Wazuh SIEM  
 > **Thư mục làm việc:** `d:\soar`  
-> **Ngày cập nhật:** 2026-09-01  
-> **Trạng thái:** Hoàn thiện 100% (Backend Test 8/8 Passing, Frontend Build 0 Error - Tích hợp WebSocket Real-time Alerting, Toast Notifications, Webhook Secret Auth & Input Sanitization)
+> **Ngày cập nhật:** 2026-09-10  
+> **Trạng thái:** Hoàn thiện 100% (Backend Test 12/12 Passing, Frontend Build 0 Error - Tích hợp Safety Guardrails Blast Radius Mitigation & Auto-Rollback TTL Worker, WebSocket Real-time Alerting, Toast Notifications, Webhook Secret Auth & Input Sanitization)
 
 ---
 
 ## 1. TỔNG QUAN VÀ MỤC TIÊU CỐT LÕI (OVERVIEW & GOALS)
 
-1. **Giải quyết tình trạng Alert Fatigue:** Tự động hóa tiếp nhận hàng nghìn cảnh báo từ SIEM (Wazuh) và IDS (Suricata), làm giàu dữ liệu đe dọa (Threat Intelligence), và lập chỉ mục sự cố an ninh trong thời gian $< 50\text{ ms}$.
-2. **AI Tier-3 Virtual SOC Analyst:** Sử dụng mô hình ngôn ngữ lớn (Google Gemini 1.5 Flash, GPT-4o, DeepSeek, Local Ollama) kết hợp Bộ quy tắc Chuyên gia SOC Heuristics nội bộ để:
-   - Viết **Attack Narrative** (Tóm tắt diễn biến tấn công).
-   - Phân tích **Root Cause Analysis (RCA)** (Lỗ hổng, nguyên nhân gốc rễ).
-   - Tự động ánh xạ ma trận quốc tế **MITRE ATT&CK Framework** (`T1110`, `T1190`, `T1486`).
-   - Chấm điểm **Confidence Score** (Độ tin cậy) và **False Positive Risk** (Nguy cơ báo động giả).
-3. **Mô hình Phê duyệt An toàn (Human-in-the-Loop Gateway):** Playbook tự động điều phối nhưng dừng lại ở các bước can thiệp hạ tầng để chuyên viên SOC kiểm duyệt và bấm **1-Click Approve & Execute**, loại trừ hoàn toàn rủi ro AI chặn nhầm dịch vụ quan trọng của doanh nghiệp.
-4. **Thực thi trên Hạ tầng Mạng Thật (Live Remote Enforcement):** Kết nối SSH Paramiko từ máy chủ Windows sang máy ảo Kali Linux để chèn quy tắc chặn `iptables` trực tiếp vào nhân Linux và điều khiển Wazuh REST API cổng 55000.
-5. **Phòng thí nghiệm Diễn tập Tấn công (Red-Team Attack Simulator):** Tích hợp công cụ phát động gói tin SSH Brute Force (bắt tay mã hóa thật), Web SQLi Fuzzer và giả lập danh tính IP độc hại quốc tế (*Spoofed Attacker Source IP*).
+1. **Giải quyết tình trạng Alert Fatigue & Deduplication:** Tự động hóa tiếp nhận hàng nghìn cảnh báo từ SIEM (Wazuh) và IDS (Suricata), gộp nhóm trùng lặp thông minh (Alert Deduplication), làm giàu dữ liệu đe dọa (Threat Intelligence), và lập chỉ mục sự cố an ninh trong thời gian $< 50\text{ ms}$.
+2. **AI Tier-3 Virtual SOC Analyst:** Sử dụng mô hình ngôn ngữ lớn (Google Gemini 1.5 Flash, GPT-4o, DeepSeek, Local Ollama) kết hợp Bộ quy tắc Chuyên gia SOC Heuristics nội bộ để viết Attack Narrative, RCA, ánh xạ MITRE ATT&CK (`T1110`, `T1190`, `T1486`), chấm điểm Confidence Score và False Positive Risk.
+3. **Safety Guardrails & Blast Radius Mitigation (Bảo vệ Hạ tầng Trọng yếu):** Tự động từ chối bất kỳ hành vi chặn hoặc cô lập nào đối với các địa chỉ IP huyết mạch của mạng doanh nghiệp (`127.0.0.1`, `8.8.8.8`, `1.1.1.1`, Gateway `.1`, Host SOAR `192.168.56.1`, Broadcast `.255`), loại trừ hoàn toàn nguy cơ AI hoặc Analyst tự cô lập máy chủ điều hành.
+4. **Auto-Rollback TTL (Hẹn giờ gỡ chặn tự động):** Tiến trình nền (Background TTL Worker) theo dõi thời hạn khóa tạm thời (15m, 1h, 24h) và tự động unblock IP trên `iptables`/tường lửa khi hết hạn, phát sự kiện WebSocket real-time thông báo cho SOC Analyst.
+5. **Mô hình Phê duyệt An toàn (Human-in-the-Loop Gateway):** Playbook tự động điều phối dừng lại ở các bước can thiệp hạ tầng để chuyên viên SOC kiểm duyệt, chọn TTL và bấm **1-Click Approve & Execute** hoặc **Hoàn tác / Gỡ chặn IP**.
+6. **Thực thi trên Hạ tầng Mạng Thật (Live Remote Enforcement):** Kết nối SSH Paramiko từ máy chủ Windows sang máy ảo Kali Linux để chèn và tra cứu quy tắc `iptables` trực tiếp vào nhân Linux và điều khiển Wazuh REST API cổng 55000.
+7. **Phòng thí nghiệm Diễn tập Tấn công (Red-Team Attack Simulator):** Tích hợp 8 vector tấn công trực tiếp vào VM (SSH Brute Force, Web SQLi, UDP Flood, Port Scan, ICMP Flood, Web RCE, Brute Force Web Login) và giả lập danh tính IP độc hại quốc tế (*Spoofed Attacker Source IP*).
 
 ---
 

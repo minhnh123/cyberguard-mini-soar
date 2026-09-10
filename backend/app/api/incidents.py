@@ -287,9 +287,29 @@ async def unblock_incident_target(
         target=target,
         status=exec_status,
         output_message=exec_res.get("message") or f"Unblock executed for {target}",
-        executed_by=f"Analyst Unblocked ({analyst_note})" if analyst_note else "Analyst Unblocked"
+        executed_by=f"Analyst Unblocked ({analyst_note})" if analyst_note else "Analyst Unblocked",
+        is_expired=True,
+        rollback_status="manual_unblocked"
     )
     db.add(action_log)
+
+    # Đánh dấu các action log và approval liên quan là đã hoàn tác
+    for act in inc.actions:
+        if act.target == target and act.status in ["success", "live"]:
+            act.is_expired = True
+            act.rollback_status = "manual_unblocked"
+    
+    appr_res = await db.execute(
+        select(PendingApproval).where(
+            PendingApproval.incident_id == inc.id,
+            PendingApproval.target == target,
+            PendingApproval.status.in_(["executed", "approved"])
+        )
+    )
+    for app_item in appr_res.scalars().all():
+        app_item.status = "reverted"
+        app_item.is_expired = True
+        app_item.analyst_note = f"{app_item.analyst_note or ''} | Đã gỡ chặn thủ công".strip(" |")
 
     # Chuyển trạng thái sự cố sang closed nếu đang contained
     if inc.status == "contained":

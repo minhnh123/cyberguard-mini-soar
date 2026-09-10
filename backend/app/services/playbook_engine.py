@@ -196,16 +196,30 @@ class PlaybookEngine:
                             "risk_level": "low"
                         }]
 
+                    from app.services.guardrail_service import GuardrailService
                     for rec in recommended:
+                        target = rec.get("target", alert.source_ip or "N/A")
+                        action_type = rec.get("action_type", "block_ip")
+                        connector = rec.get("connector", "windows_firewall")
+                        reason = rec.get("reason", "Automated Playbook Proposal")
+                        risk_level = rec.get("risk_level", "medium")
+
+                        # Check Guardrails warning
+                        guardrail_check = await GuardrailService.validate_action_safety(target, action_type, connector, db=db)
+                        if not guardrail_check.get("allowed", True):
+                            reason = f"[GUARDRAIL WARNING: Protected Critical IP] {reason} - {guardrail_check.get('reason')}"
+                            risk_level = "critical"
+
                         approval = PendingApproval(
                             incident_id=incident.id,
                             playbook_execution_id=execution.id,
-                            action_type=rec.get("action_type", "block_ip"),
-                            connector=rec.get("connector", "windows_firewall"),
-                            target=rec.get("target", alert.source_ip or "N/A"),
+                            action_type=action_type,
+                            connector=connector,
+                            target=target,
                             parameters=rec.get("parameters", {}),
-                            reason=rec.get("reason", "Automated Playbook Proposal"),
-                            risk_level=rec.get("risk_level", "medium"),
+                            reason=reason,
+                            risk_level=risk_level,
+                            ttl_minutes=60,
                             status="pending"
                         )
                         db.add(approval)

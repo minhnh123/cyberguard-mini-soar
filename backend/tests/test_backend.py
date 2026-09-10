@@ -182,26 +182,32 @@ async def test_approval_rollback():
         assert resp.status_code == 200
         approvals = resp.json()
         
-        # If no approval, simulate an alert to create one
-        if not approvals:
-            await client.post("/api/v1/alerts/simulate?scenario=brute_force")
+        # Find an approval that is pending or executed, or create a new one
+        target_appr = next((a for a in approvals if a["status"] in ["pending", "executed"]), None)
+        if not target_appr:
+            sim_resp = await client.post("/api/v1/alerts/simulate?scenario=brute_force")
+            assert sim_resp.status_code == 200
             resp = await client.get("/api/v1/approvals")
             approvals = resp.json()
+            target_appr = next((a for a in approvals if a["status"] in ["pending", "executed"]), approvals[0] if approvals else None)
 
-        assert len(approvals) > 0
-        appr = approvals[0]
+        assert target_appr is not None
+        appr_id = target_appr["id"]
         
-        # If pending, approve it first
-        if appr["status"] == "pending":
+        # If pending, approve it first with TTL
+        if target_appr["status"] == "pending":
             dec_resp = await client.post(
-                f"/api/v1/approvals/{appr['id']}/decision",
-                json={"decision": "approve", "analyst_note": "Approved in pytest"}
+                f"/api/v1/approvals/{appr_id}/decision",
+                json={"decision": "approve", "analyst_note": "Approved in pytest", "ttl_minutes": 15}
             )
             assert dec_resp.status_code == 200
+            dec_data = dec_resp.json()
+            assert dec_data["ttl_minutes"] == 15
+            assert dec_data["expires_at"] is not None
 
         # Now test rollback
         rb_resp = await client.post(
-            f"/api/v1/approvals/{appr['id']}/rollback",
+            f"/api/v1/approvals/{appr_id}/rollback",
             json={"analyst_note": "Rollback in pytest"}
         )
         assert rb_resp.status_code == 200
@@ -209,6 +215,87 @@ async def test_approval_rollback():
         assert rb_data["status"] in ["success", "already_reverted"]
         if rb_data["status"] == "success":
             assert rb_data["approval_status"] == "reverted"
+
+@pytest.mark.asyncio
+async def test_safety_guardrails_blast_radius():
+    """
+    Ensure safety guardrails reject any attempt to block protected infrastructure IPs (DNS, Gateways, SOAR host).
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Ingest an alert with source_ip 8.8.8.8 (Google Public DNS)
+        resp = await client.post("/api/v1/alerts/webhook", json={
+            "title": "Suspicious DNS traffic",
+            "source_ip": "8.8.8.8",
+            "severity": "high",
+            "description": "Probe from 8.8.8.8"
+        })
+        assert resp.status_code == 200
+        
+        # Check generated approvals
+        appr_resp = await client.get("/api/v1/approvals")
+        approvals = appr_resp.json()
+        dns_appr = next((a for a in approvals if a["target"] == "8.8.8.8" and a["status"] == "pending"), None)
+        
+        if dns_appr:
+            # Attempting to approve 8.8.8.8 MUST be rejected by Safety Guardrails with HTTP 400
+            dec_resp = await client.post(
+                f"/api/v1/approvals/{dns_appr['id']}/decision",
+                json={"decision": "approve", "analyst_note": "Try to block DNS"}
+            )
+            assert dec_resp.status_code == 400
+            assert "BLAST_RADIUS_VIOLATION" in dec_resp.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_auto_rollback_ttl_worker():
+    """
+    Test background TTL worker auto-rollbacks expired actions.
+    """
+    from app.services.ttl_worker import check_and_rollback_expired_actions
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import PendingApproval, Incident
+    import datetime
+    
+    # Insert an expired approval in database
+    async with AsyncSessionLocal() as session:
+        inc = Incident(
+            incident_number=f"INC-TEST-TTL-{int(datetime.datetime.utcnow().timestamp())}",
+            title="TTL Auto-Rollback Unit Test",
+            severity="high",
+            status="contained"
+        )
+        session.add(inc)
+        await session.commit()
+        await session.refresh(inc)
+
+        expired_appr = PendingApproval(
+            incident_id=inc.id,
+            action_type="block_ip",
+            connector="linux_ssh",
+            target="198.51.100.99",
+            parameters={"direction": "inbound"},
+            reason="Test TTL expiration",
+            risk_level="medium",
+            status="executed",
+            ttl_minutes=15,
+            expires_at=datetime.datetime.utcnow() - datetime.timedelta(minutes=5),  # 5 minutes in the past
+            is_expired=False
+        )
+        session.add(expired_appr)
+        await session.commit()
+        await session.refresh(expired_appr)
+        appr_id = expired_appr.id
+
+    # Run the worker cycle
+    await check_and_rollback_expired_actions()
+
+    # Verify that the approval has been auto-reverted
+    async with AsyncSessionLocal() as session:
+        res = await session.get(PendingApproval, appr_id)
+        assert res is not None
+        assert res.status == "reverted"
+        assert res.is_expired == True
+        assert "TTL Expired" in (res.analyst_note or "")
 
 @pytest.mark.asyncio
 async def test_firewall_rules_inspection():

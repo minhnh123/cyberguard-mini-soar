@@ -138,6 +138,9 @@ class PendingApprovalResponse(BaseModel):
     risk_level: str
     status: str
     analyst_note: Optional[str] = None
+    ttl_minutes: Optional[int] = 60
+    expires_at: Optional[datetime.datetime] = None
+    is_expired: Optional[bool] = False
     created_at: datetime.datetime
     resolved_at: Optional[datetime.datetime] = None
 
@@ -147,6 +150,7 @@ class PendingApprovalResponse(BaseModel):
 class ApprovalDecisionRequest(BaseModel):
     decision: str  # approve, reject
     analyst_note: Optional[str] = None
+    ttl_minutes: Optional[int] = 60  # default 60 minutes, None or 0 for permanent
 
 class ApprovalRollbackRequest(BaseModel):
     analyst_note: Optional[str] = "Hoàn tác bởi SOC Analyst"
@@ -161,6 +165,10 @@ class ActionLogResponse(BaseModel):
     status: str
     output_message: Optional[str] = None
     executed_by: str
+    ttl_minutes: Optional[int] = None
+    expires_at: Optional[datetime.datetime] = None
+    is_expired: Optional[bool] = False
+    rollback_status: Optional[str] = None
     created_at: datetime.datetime
 
     class Config:

@@ -121,6 +121,11 @@ class PendingApproval(Base):
     status = Column(String(32), default="pending")    # pending, approved, rejected, executed, failed
     analyst_note = Column(Text, nullable=True)
     
+    # TTL & Auto-Rollback Fields
+    ttl_minutes = Column(Integer, nullable=True, default=60)
+    expires_at = Column(DateTime, nullable=True)
+    is_expired = Column(Boolean, default=False)
+    
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
 
@@ -136,9 +141,16 @@ class ActionLog(Base):
     action_type = Column(String(64), nullable=False)
     connector = Column(String(64), nullable=False)
     target = Column(String(255), nullable=False)
-    status = Column(String(32), default="success")    # success, failed, dry_run
+    status = Column(String(32), default="success")    # success, failed, dry_run, reverted
     output_message = Column(Text, nullable=True)
     executed_by = Column(String(128), default="Analyst")
+    
+    # TTL & Auto-Rollback Tracking
+    ttl_minutes = Column(Integer, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    is_expired = Column(Boolean, default=False)
+    rollback_status = Column(String(32), nullable=True) # active, auto_unblocked, manual_unblocked
+    
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships

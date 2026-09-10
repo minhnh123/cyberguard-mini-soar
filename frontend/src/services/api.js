@@ -30,8 +30,8 @@ export const IncidentsAPI = {
 
 export const ApprovalsAPI = {
   list: (params) => api.get('/approvals', { params }).then(r => r.data),
-  decision: (id, decision, analystNote = '') =>
-    api.post(`/approvals/${id}/decision`, { decision, analyst_note: analystNote }).then(r => r.data),
+  decision: (id, decision, analystNote = '', ttlMinutes = 60) =>
+    api.post(`/approvals/${id}/decision`, { decision, analyst_note: analystNote, ttl_minutes: ttlMinutes }).then(r => r.data),
   rollback: (id, analystNote = '') =>
     api.post(`/approvals/${id}/rollback`, { analyst_note: analystNote }).then(r => r.data),
 };

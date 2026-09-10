@@ -16,16 +16,25 @@ from app.api.settings import router as settings_router
 from app.api.stats import router as stats_router
 from app.api.mitre import router as mitre_router
 
+import asyncio
+from app.services.ttl_worker import start_ttl_worker
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("[CyberGuard SOAR] Initializing Database & Seed Data...")
     await init_db()
     await seed_database()
+    ttl_task = asyncio.create_task(start_ttl_worker(interval_seconds=15))
     print("[CyberGuard SOAR] Ready to receive alerts and orchestrate incident responses.")
     yield
     # Shutdown
     print("[CyberGuard SOAR] Shutting down.")
+    ttl_task.cancel()
+    try:
+        await ttl_task
+    except (asyncio.CancelledError, Exception):
+        pass
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

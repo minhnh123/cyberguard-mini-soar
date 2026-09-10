@@ -29,9 +29,8 @@ export default function Navbar({ activeTab, onRefresh, isRefreshing, pendingAppr
         {pendingApprovalsCount > 0 && (
           <button
             onClick={onGoApprovals}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold shadow-sm transition animate-pulse"
+            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold shadow-sm transition animate-pulse"
           >
-            <CheckCircle2 className="w-4 h-4 text-amber-400" />
             <span>{pendingApprovalsCount} Action{pendingApprovalsCount > 1 ? 's' : ''} Awaiting Approval</span>
           </button>
         )}
@@ -39,9 +38,8 @@ export default function Navbar({ activeTab, onRefresh, isRefreshing, pendingAppr
         {/* Quick Simulator button */}
         <button
           onClick={onOpenSimulator}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-medium transition"
+          className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-medium transition"
         >
-          <Zap className="w-3.5 h-3.5 text-cyan-400" />
           <span>Simulate Attack</span>
         </button>
 

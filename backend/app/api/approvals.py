@@ -64,7 +64,28 @@ async def handle_approval_decision(
         }
 
     elif request.decision.lower() == "approve":
+        # Check Safety Guardrails before approving
+        from app.services.guardrail_service import GuardrailService
+        safety_check = await GuardrailService.validate_action_safety(
+            target=approval.target,
+            action_type=approval.action_type,
+            connector=approval.connector,
+            db=db
+        )
+        if not safety_check.get("allowed", True):
+            raise HTTPException(
+                status_code=400,
+                detail=safety_check.get("reason", f"Action on target {approval.target} violated Safety Guardrails.")
+            )
+
+        # Calculate TTL & Expiration
+        ttl_minutes = request.ttl_minutes if (request.ttl_minutes is not None and request.ttl_minutes > 0) else None
+        expires_at = (approval.resolved_at + datetime.timedelta(minutes=ttl_minutes)) if ttl_minutes else None
+
         approval.status = "approved"
+        approval.ttl_minutes = ttl_minutes
+        approval.expires_at = expires_at
+        approval.is_expired = False
         await db.commit()
 
         # Execute response connector
@@ -79,7 +100,7 @@ async def handle_approval_decision(
         exec_status = exec_res.get("status", "success")
         approval.status = "executed" if exec_status in ["success", "dry_run", "live_success", "live", "info"] else "failed"
 
-        # Record in ActionLog
+        # Record in ActionLog with TTL info
         action_log = ActionLog(
             incident_id=approval.incident_id,
             action_type=approval.action_type,
@@ -87,7 +108,11 @@ async def handle_approval_decision(
             target=approval.target,
             status=exec_status,
             output_message=exec_res.get("message"),
-            executed_by="Analyst Approved"
+            executed_by="Analyst Approved",
+            ttl_minutes=ttl_minutes,
+            expires_at=expires_at,
+            is_expired=False,
+            rollback_status="active" if (ttl_minutes and exec_status in ["success", "live", "dry_run"]) else None
         )
         db.add(action_log)
 
@@ -123,6 +148,8 @@ async def handle_approval_decision(
                 "status": approval.status,
                 "target": approval.target,
                 "connector": approval.connector,
+                "ttl_minutes": ttl_minutes,
+                "expires_at": expires_at.isoformat() if expires_at else None,
                 "execution_result": exec_res
             })
         except Exception:
@@ -131,6 +158,8 @@ async def handle_approval_decision(
         return {
             "status": approval.status,
             "execution_result": exec_res,
+            "ttl_minutes": ttl_minutes,
+            "expires_at": expires_at.isoformat() if expires_at else None,
             "approval_id": approval.id
         }
 

@@ -23,7 +23,10 @@ DEFAULT_SETTINGS = [
     {"key": "CLOUDFLARE_ZONE_ID", "value": "", "category": "connectors", "is_secret": False, "description": "Cloudflare Zone ID"},
     {"key": "LINUX_SSH_HOST", "value": "", "category": "connectors", "is_secret": False, "description": "Linux Gateway Host/IP for iptables/ufw block"},
     {"key": "LINUX_SSH_USER", "value": "root", "category": "connectors", "is_secret": False, "description": "Linux Gateway SSH Username"},
-    {"key": "LINUX_SSH_PASSWORD", "value": "", "category": "connectors", "is_secret": True, "description": "Linux Gateway SSH Password"}
+    {"key": "LINUX_SSH_PASSWORD", "value": "", "category": "connectors", "is_secret": True, "description": "Linux Gateway SSH Password"},
+    {"key": "SAFETY_GUARDRAILS_ENABLED", "value": "true", "category": "safety", "is_secret": False, "description": "Enable Blast Radius Safety Guardrails (Blocks whitelisted IP actions)"},
+    {"key": "SAFETY_WHITELIST_IPS", "value": "127.0.0.1, 8.8.8.8, 8.8.4.4, 1.1.1.1, 192.168.56.1, 10.0.0.1", "category": "safety", "is_secret": False, "description": "Critical Infrastructure Whitelist IPs/CIDRs (Separated by comma)"},
+    {"key": "DEFAULT_BLOCK_TTL_MINUTES", "value": "60", "category": "safety", "is_secret": False, "description": "Default Auto-Rollback TTL duration in minutes (e.g. 15, 60, 1440)"}
 ]
 
 @router.get("")

@@ -28,6 +28,30 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
   const [statusFilter, setStatusFilter] = useState('pending');
   const [actionInProgress, setActionInProgress] = useState(false);
   const [notes, setNotes] = useState({});
+  const [approvalTtl, setApprovalTtl] = useState({});
+
+  const formatTtlRemaining = (expiresAt) => {
+    if (!expiresAt) return 'N/A';
+    try {
+      const diffMs = new Date(expiresAt) - new Date();
+      if (diffMs <= 0) return 'Đang hoàn tác...';
+      const mins = Math.ceil(diffMs / 60000);
+      if (mins >= 60) {
+        const hours = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        return `${hours}h ${remMins}m`;
+      }
+      return `${mins} phút`;
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const isProtectedTarget = (target, reason) => {
+    if (reason && reason.includes("GUARDRAIL WARNING")) return true;
+    const protectedList = ['8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '9.9.9.9', '192.168.56.1', '127.0.0.1', 'localhost'];
+    return protectedList.includes(target);
+  };
 
   // Rollback state
   const [rollbackInProgressId, setRollbackInProgressId] = useState(null);
@@ -87,10 +111,11 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
     try {
       setActionInProgress(true);
       const note = notes[approvalId] || '';
-      await ApprovalsAPI.decision(approvalId, decision, note);
+      const ttl = approvalTtl[approvalId] !== undefined ? approvalTtl[approvalId] : 60;
+      await ApprovalsAPI.decision(approvalId, decision, note, ttl);
       await loadApprovals();
     } catch (err) {
-      alert(`Thao tác thất bại: ${err.message}`);
+      alert(`Thao tác thất bại: ${err.response?.data?.detail || err.message}`);
     } finally {
       setActionInProgress(false);
     }
@@ -158,8 +183,7 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
       {/* Top Header Card */}
       <div className="p-5 rounded-xl bg-gradient-to-r from-amber-950/30 via-slate-900 to-slate-900 border border-amber-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-amber-200 flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-amber-400" />
+          <h2 className="text-base font-bold text-amber-200">
             Human-in-the-Loop Security Approval Queue
           </h2>
           <p className="text-xs text-slate-400 mt-1">
@@ -174,9 +198,8 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
               setShowRulesModal(true);
               loadFirewallRules(activeRulesConnector);
             }}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 border border-cyan-500/30 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm hover:border-cyan-400/60"
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 border border-cyan-500/30 text-xs font-semibold transition shadow-sm hover:border-cyan-400/60"
           >
-            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
             <span>Xem Rule Máy Ảo</span>
           </button>
 
@@ -305,10 +328,9 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                 <div className="flex items-center gap-3 text-right">
                   <button
                     onClick={() => onSelectIncident(appr.incident_id)}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium"
+                    className="text-xs text-cyan-400 hover:text-cyan-300 font-medium transition"
                   >
                     <span>View Incident #{appr.incident_id}</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
                   </button>
                   <span className="text-[10px] text-slate-500 font-mono">
                     {formatLocalTime(appr.created_at)}
@@ -320,21 +342,53 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
               <div className="p-3.5 rounded-lg bg-slate-950/60 border border-slate-800 text-xs space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold">
                   <span>AI Tier-3 Investigation Rationale:</span>
-                  <span className="text-amber-400 uppercase">Risk Level: {appr.risk_level}</span>
+                  <span className={`${isProtectedTarget(appr.target, appr.reason) ? 'text-rose-400 font-bold' : 'text-amber-400'} uppercase`}>
+                    Risk Level: {appr.risk_level}
+                  </span>
                 </div>
                 <p className="text-slate-300 leading-relaxed">{appr.reason}</p>
               </div>
 
+              {/* Safety Guardrail Violation Banner */}
+              {isProtectedTarget(appr.target, appr.reason) && appr.status === 'pending' && (
+                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/40 text-xs text-rose-300 flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-rose-200">BLAST RADIUS VIOLATION - HẠ TẦNG TRỌNG YẾU ĐƯỢC BẢO VỆ</div>
+                    <div className="text-[11px] text-rose-300/90 mt-0.5 leading-relaxed">
+                      Mục tiêu <code>{appr.target}</code> nằm trong danh sách White-list bảo vệ hệ thống (DNS công cộng, Gateway, hoặc Host SOAR). Safety Guardrails sẽ chặn lệnh này để tránh nguy cơ tự ngắt kết nối mạng doanh nghiệp!
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Action Controls for Pending Approvals */}
               {appr.status === 'pending' && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-800">
-                  <input
-                    type="text"
-                    placeholder="Analyst confirmation note or reason..."
-                    value={notes[appr.id] || ''}
-                    onChange={(e) => setNotes({ ...notes, [appr.id]: e.target.value })}
-                    className="w-full sm:w-80 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  />
+                  <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                    <input
+                      type="text"
+                      placeholder="Ghi chú xác nhận của Analyst..."
+                      value={notes[appr.id] || ''}
+                      onChange={(e) => setNotes({ ...notes, [appr.id]: e.target.value })}
+                      className="w-full sm:w-64 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                    />
+
+                    {/* TTL Duration Selector */}
+                    <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                      <span className="text-[11px] text-slate-400 font-medium">Hạn chặn (TTL):</span>
+                      <select
+                        value={approvalTtl[appr.id] !== undefined ? approvalTtl[appr.id] : 60}
+                        onChange={(e) => setApprovalTtl({ ...approvalTtl, [appr.id]: Number(e.target.value) })}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-semibold text-cyan-300 focus:outline-none focus:border-amber-500"
+                      >
+                        <option value={15}>15 phút (Diễn tập)</option>
+                        <option value={60}>1 giờ (Mặc định)</option>
+                        <option value={1440}>24 giờ (1 ngày)</option>
+                        <option value={0}>Vĩnh viễn (Không TTL)</option>
+                      </select>
+                    </div>
+                  </div>
 
                   <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                     <button
@@ -346,11 +400,15 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                     </button>
                     <button
                       onClick={() => handleDecision(appr.id, 'approve')}
-                      disabled={actionInProgress}
-                      className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20"
+                      disabled={actionInProgress || isProtectedTarget(appr.target, appr.reason)}
+                      className={`px-5 py-2 rounded-lg text-xs font-bold transition shadow-lg ${
+                        isProtectedTarget(appr.target, appr.reason)
+                          ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20'
+                      }`}
+                      title={isProtectedTarget(appr.target, appr.reason) ? "Không thể thực thi do vi phạm Safety Guardrails" : "Phê duyệt và áp dụng"}
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Approve & Execute Now</span>
+                      <span>{isProtectedTarget(appr.target, appr.reason) ? 'Bị khóa bởi Guardrails' : 'Approve & Execute Now'}</span>
                     </button>
                   </div>
                 </div>
@@ -359,9 +417,19 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
               {/* Rollback / Undo Controls for Executed Approvals */}
               {appr.status === 'executed' && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                     <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     <span>Quy tắc đang hiệu lực trên <strong className="text-slate-200 font-mono">{appr.connector}</strong></span>
+                    {appr.expires_at ? (
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-cyan-400" />
+                        <span>Tự động gỡ sau: {formatTtlRemaining(appr.expires_at)}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                        TTL: Vĩnh viễn
+                      </span>
+                    )}
                   </div>
 
                   {showRollbackConfirmId === appr.id ? (
@@ -376,14 +444,9 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                       <button
                         onClick={() => handleRollback(appr.id)}
                         disabled={rollbackInProgressId === appr.id}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition flex items-center gap-1 shrink-0"
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition shrink-0"
                       >
-                        {rollbackInProgressId === appr.id ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        )}
-                        <span>Xác nhận Hoàn tác</span>
+                        <span>{rollbackInProgressId === appr.id ? 'Đang hoàn tác...' : 'Xác nhận Hoàn tác'}</span>
                       </button>
                       <button
                         onClick={() => setShowRollbackConfirmId(null)}
@@ -401,9 +464,8 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                           [appr.id]: `Hoàn tác gỡ chặn IP ${appr.target} trên ${appr.connector}`
                         });
                       }}
-                      className="px-3.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition hover:border-amber-400/60"
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition hover:border-amber-400/60"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
                       <span>Hoàn tác / Gỡ chặn IP ({appr.target})</span>
                     </button>
                   )}
@@ -412,9 +474,13 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
 
               {/* Status Note for Reverted Approvals */}
               {appr.status === 'reverted' && (
-                <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80 text-xs text-purple-300">
-                  <RotateCcw className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                <div className="pt-2 border-t border-slate-800/80 text-xs text-purple-300 flex items-center justify-between">
                   <span>Yêu cầu này đã được hoàn tác. Rule chặn trên <strong>{appr.connector}</strong> đã được gỡ bỏ an toàn.</span>
+                  {appr.analyst_note?.includes("TTL Expired") && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold">
+                      Auto-Rollback (TTL Expired)
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -472,20 +538,20 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <span>🐧 Kali Linux VM (iptables)</span>
+                  <span>Kali Linux VM (iptables)</span>
                 </button>
                 <button
                   onClick={() => {
                     setActiveRulesConnector('windows_firewall');
                     loadFirewallRules('windows_firewall');
                   }}
-                  className={`px-3.5 py-1.5 rounded-md font-medium transition flex items-center gap-2 ${
+                  className={`px-3.5 py-1.5 rounded-md font-medium transition ${
                     activeRulesConnector === 'windows_firewall'
                       ? 'bg-cyan-600 text-white font-bold shadow'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <span>🪟 Windows Defender Firewall</span>
+                  <span>Windows Defender Firewall</span>
                 </button>
               </div>
 
@@ -493,10 +559,9 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                 <button
                   onClick={() => loadFirewallRules(activeRulesConnector)}
                   disabled={rulesLoading}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition border border-slate-700"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition border border-slate-700"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${rulesLoading ? 'animate-spin' : ''}`} />
-                  <span>Làm mới</span>
+                  <span>{rulesLoading ? 'Đang tải...' : 'Làm mới'}</span>
                 </button>
               </div>
             </div>
@@ -612,14 +677,9 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                                   <button
                                     onClick={() => executeDeleteRule(targetVal)}
                                     disabled={isDeleting}
-                                    className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition shadow flex items-center gap-1"
+                                    className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] transition shadow"
                                   >
-                                    {isDeleting ? (
-                                      <RefreshCw className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="w-3 h-3" />
-                                    )}
-                                    <span>Xác nhận xóa</span>
+                                    <span>{isDeleting ? 'Đang xóa...' : 'Xác nhận xóa'}</span>
                                   </button>
                                   <button
                                     onClick={() => setConfirmDeleteTarget(null)}
@@ -634,10 +694,9 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                                     setConfirmDeleteTarget(targetVal);
                                     setRuleNotification(null);
                                   }}
-                                  className="px-2.5 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition inline-flex items-center gap-1"
+                                  className="px-2.5 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] font-semibold transition"
                                   title="Gỡ bỏ rule này ngay lập tức"
                                 >
-                                  <Trash2 className="w-3 h-3" />
                                   <span>Gỡ bỏ</span>
                                 </button>
                               )}
@@ -662,17 +721,15 @@ export default function ApprovalsPage({ onSelectIncident, lastWsEvent }) {
                   <div className="flex items-center justify-between mb-2">
                     <button
                       onClick={() => setShowRawOutput(!showRawOutput)}
-                      className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 transition font-mono"
+                      className="text-xs text-slate-400 hover:text-slate-200 transition font-mono"
                     >
-                      <Terminal className="w-3.5 h-3.5 text-cyan-400" />
                       <span>{showRawOutput ? 'Ẩn' : 'Xem'} kết quả Terminal gốc ({activeRulesConnector === 'linux_ssh' ? 'iptables -L INPUT -n' : 'netsh advfirewall'})</span>
                     </button>
                     {showRawOutput && (
                       <button
                         onClick={() => copyToClipboard(vmRulesData.raw_output)}
-                        className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                        className="text-[11px] text-slate-400 hover:text-slate-200 transition"
                       >
-                        {copiedRaw ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                         <span>{copiedRaw ? 'Đã sao chép' : 'Sao chép output'}</span>
                       </button>
                     )}
