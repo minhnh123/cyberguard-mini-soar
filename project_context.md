@@ -3,14 +3,14 @@
 > **Dự án:** CyberGuard Mini SOAR – Nền tảng Điều phối, Tự động hóa và Phản hồi An ninh mạng tích hợp AI Tier-3 Triage & Wazuh SIEM  
 > **Thư mục làm việc:** `d:\soar`  
 > **Ngày cập nhật:** 2026-09-10  
-> **Trạng thái:** Hoàn thiện 100% (Backend Test 14/14 Passing, Frontend Build 0 Error - Đã tích hợp trọn vẹn Bước 1: Safety Guardrails & Auto-Rollback TTL Worker và Bước 2: Bổ sung 2 Connector tối quan trọng ngoài SSH: Enterprise Identity Provider & Central Webhook EDR)
+> **Trạng thái:** Hoàn thiện 100% (Backend Test 16/16 Passing, Frontend Build 0 Error - Đã tích hợp trọn vẹn Bước 1: Safety Guardrails & Auto-Rollback TTL Worker, Bước 2: Bổ sung 2 Connector tối quan trọng: Enterprise Identity Provider & Central Webhook EDR, và Bước 3: Nâng cấp AI Triage với ReAct / Multi-turn Autonomous Investigation Engine)
 
 ---
 
 ## 1. TỔNG QUAN VÀ MỤC TIÊU CỐT LÕI (OVERVIEW & GOALS)
 
 1. **Giải quyết tình trạng Alert Fatigue & Deduplication:** Tự động hóa tiếp nhận hàng nghìn cảnh báo từ SIEM (Wazuh) và IDS (Suricata), gộp nhóm trùng lặp thông minh (Alert Deduplication), làm giàu dữ liệu đe dọa (Threat Intelligence), và lập chỉ mục sự cố an ninh trong thời gian $< 50\text{ ms}$.
-2. **AI Tier-3 Virtual SOC Analyst:** Sử dụng mô hình ngôn ngữ lớn (Google Gemini 1.5 Flash, GPT-4o, DeepSeek, Local Ollama) kết hợp Bộ quy tắc Chuyên gia SOC Heuristics nội bộ để viết Attack Narrative, RCA, ánh xạ MITRE ATT&CK (`T1110`, `T1078`, `T1190`, `T1486`, `T1539`), chấm điểm Confidence Score và False Positive Risk.
+2. **AI Tier-3 Virtual SOC Analyst & Autonomous ReAct Engine:** Sử dụng chu trình điều tra đa lượt tự chủ **ReAct (Reasoning + Acting)** lặp qua 2–3 vòng: đặt giả thuyết (**Thought**), gọi công cụ kiểm tra thực tế (**Action Tool Calling**), thu thập chứng cứ (**Observation**) rồi mới tổng hợp Attack Narrative, RCA, ánh xạ MITRE ATT&CK (`T1110`, `T1078`, `T1190`, `T1486`, `T1539`), chấm điểm Confidence Score và False Positive Risk. Cung cấp tính năng **Interactive Deep Investigation** cho phép chuyên viên SOC đặt câu hỏi chuyên sâu và tái phân tích thời gian thực.
 3. **Safety Guardrails & Blast Radius Mitigation (Bảo vệ Hạ tầng Trọng yếu):** Tự động từ chối bất kỳ hành vi chặn hoặc cô lập nào đối với các địa chỉ IP huyết mạch của mạng doanh nghiệp (`127.0.0.1`, `8.8.8.8`, `1.1.1.1`, Gateway `.1`, Host SOAR `192.168.56.1`, Broadcast `.255`), loại trừ hoàn toàn nguy cơ AI hoặc Analyst tự cô lập máy chủ điều hành.
 4. **Auto-Rollback TTL (Hẹn giờ gỡ chặn tự động):** Tiến trình nền (Background TTL Worker) theo dõi thời hạn khóa tạm thời (15m, 1h, 24h) và tự động unblock IP/reconnect host trên `iptables`/tường lửa/EDR khi hết hạn, phát sự kiện WebSocket real-time thông báo cho SOC Analyst.
 5. **Đa dạng hóa Hệ thống Điều phối Phản hồi Ngoài SSH (Multi-Domain Connectors):**
@@ -77,14 +77,17 @@ d:\soar\
 │   │   ├── seed_data\
 │   │   │   └── seed.py                # Dữ liệu mẫu Playbooks & Cấu hình mặc định
 │   │   ├── services\                  # CÁC DỊCH VỤ NGHIỆP VỤ LÕI
-│   │   │   ├── ai_service.py          # Google Gemini 1.5 Flash & Heuristics Triage
+│   │   │   ├── ai_service.py          # ReAct Autonomous Investigation & LLM Triage
 │   │   │   ├── enrichment_service.py  # Làm giàu CTI (IP-API, VirusTotal v3 Cache)
+│   │   │   ├── guardrail_service.py   # Safety Guardrails & Blast Radius Mitigation
+│   │   │   ├── investigation_tools.py # 5 Công cụ Điều tra Hệ thống Thực tế cho AI
 │   │   │   ├── mitre_service.py       # Ánh xạ Chiến thuật & Kỹ thuật MITRE
 │   │   │   ├── playbook_engine.py     # Động cơ duyệt đồ thị kịch bản phản hồi
-│   │   │   └── response_service.py    # Điều phối SSH iptables, Wazuh AR, WAF
+│   │   │   ├── response_service.py    # Điều phối SSH iptables, Wazuh AR, Identity, EDR
+│   │   │   └── ttl_worker.py          # Tiến trình nền Auto-Rollback TTL
 │   │   └── main.py                    # Điểm khởi động FastAPI App & CORS
 │   ├── tests\
-│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (5/5 tests)
+│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (16/16 tests passing)
 │   ├── requirements.txt               # Thư viện Python phụ thuộc
 │   └── soar.db                        # Cơ sở dữ liệu SQLite Async
 ├── frontend\                          # FRONTEND REACT + VITE + TAILWINDCSS

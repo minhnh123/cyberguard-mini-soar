@@ -33,6 +33,7 @@ export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncid
   const [severityFilter, setSeverityFilter] = useState('');
   const [actionInProgress, setActionInProgress] = useState(false);
   const [analystNote, setAnalystNote] = useState('');
+  const [deepQuery, setDeepQuery] = useState('');
 
   const loadIncidents = async () => {
     try {
@@ -93,13 +94,17 @@ export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncid
     }
   };
 
-  const handleReanalyze = async () => {
+  const handleReanalyze = async (query = null) => {
     if (!activeIncident) return;
     try {
       setLoadingDetail(true);
-      await IncidentsAPI.reanalyze(activeIncident.id);
+      const payload = (typeof query === 'string' && query.trim()) ? { analyst_query: query.trim() } : {};
+      await IncidentsAPI.reanalyze(activeIncident.id, payload);
       await loadIncidentDetail(activeIncident.id);
       await loadIncidents();
+      if (typeof query === 'string') {
+        setDeepQuery('');
+      }
     } catch (err) {
       alert(`Re-analyze error: ${err.message}`);
     } finally {
@@ -369,6 +374,94 @@ export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncid
                     ) : (
                       <span className="text-xs text-slate-500">No specific MITRE techniques mapped yet</span>
                     )}
+                  </div>
+                </div>
+
+                {/* ReAct Autonomous Investigation Trace */}
+                {activeIncident.ai_analysis?.investigation_trail && activeIncident.ai_analysis.investigation_trail.length > 0 && (
+                  <div className="space-y-3 pt-3 border-t border-indigo-500/20">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-indigo-300">
+                        ReAct Autonomous Investigation Trace ({activeIncident.ai_analysis.investigation_trail.length} Rounds)
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-900/50 text-indigo-300 border border-indigo-500/30">
+                        Explainable Multi-Hop AI
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {activeIncident.ai_analysis.investigation_trail.map((step, idx) => (
+                        <div key={idx} className="p-3.5 rounded-lg bg-slate-950/80 border border-slate-800 text-xs space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-cyan-400 font-bold text-[11px]">
+                              ROUND {step.round || (idx + 1)}
+                            </span>
+                            <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-500/30">
+                              Tool: {step.action}
+                            </span>
+                          </div>
+
+                          {/* Thought */}
+                          <div className="p-2.5 rounded bg-slate-900/90 border-l-2 border-indigo-400 text-slate-300 leading-relaxed">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 mb-1">
+                              Investigative Hypothesis (Thought):
+                            </div>
+                            <p className="italic text-slate-200">{step.thought}</p>
+                          </div>
+
+                          {/* Action Input */}
+                          {step.action_input && Object.keys(step.action_input).length > 0 && (
+                            <div className="text-[11px] font-mono text-slate-400 bg-slate-900/50 px-2.5 py-1.5 rounded border border-slate-800">
+                              <span className="text-slate-500">Parameters:</span> {JSON.stringify(step.action_input)}
+                            </div>
+                          )}
+
+                          {/* Observation */}
+                          <div className="space-y-1">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                              Live Observation / Evidence:
+                            </div>
+                            <pre className="p-2.5 rounded bg-black/60 border border-slate-800/80 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-40 whitespace-pre-wrap">
+                              {typeof step.observation === 'object' 
+                                ? JSON.stringify(step.observation, null, 2) 
+                                : String(step.observation)}
+                            </pre>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Interactive ReAct Deep Inquiry */}
+                <div className="p-3.5 rounded-lg bg-slate-950/70 border border-indigo-500/30 space-y-2 pt-3">
+                  <div className="text-xs font-semibold text-slate-200">
+                    Interactive Deep Investigation
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Chỉ thị hoặc đặt câu hỏi chuyên sâu cho SOC AI (ví dụ: "Kiểm tra tiến trình con của PID 4821 và lịch sử đăng nhập SSH gần nhất").
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={deepQuery}
+                      onChange={(e) => setDeepQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && deepQuery.trim() && !loadingDetail) {
+                          handleReanalyze(deepQuery);
+                        }
+                      }}
+                      placeholder="Nhập câu hỏi điều tra chuyên sâu..."
+                      disabled={loadingDetail}
+                      className="flex-1 px-3 py-2 text-xs bg-slate-900 border border-slate-700 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      onClick={() => handleReanalyze(deepQuery)}
+                      disabled={loadingDetail || !deepQuery.trim()}
+                      className="px-4 py-2 text-xs font-medium rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                      {loadingDetail ? 'Đang điều tra...' : 'Deep Investigate'}
+                    </button>
                   </div>
                 </div>
               </div>

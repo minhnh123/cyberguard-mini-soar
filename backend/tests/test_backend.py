@@ -36,7 +36,7 @@ async def test_alert_ingestion_and_auto_incident():
         assert "Brute Force" in latest_inc["title"] or latest_inc["severity"] in ["high", "critical", "medium"]
 
         # Check pending approvals
-        app_resp = await client.get("/api/v1/approvals")
+        app_resp = await client.get("/api/v1/approvals?status=pending")
         assert app_resp.status_code == 200
         approvals = app_resp.json()
         assert len(approvals) > 0
@@ -47,7 +47,7 @@ async def test_alert_ingestion_and_auto_incident():
             f"/api/v1/approvals/{approval_id}/decision",
             json={"decision": "approve", "analyst_note": "Approved by SOC Lead in automated test"}
         )
-        assert decision_resp.status_code == 200
+        assert decision_resp.status_code == 200, f"Error: {decision_resp.text}"
         decision_data = decision_resp.json()
         assert decision_data["status"] in ["executed", "success", "failed"]
 
@@ -412,3 +412,66 @@ async def test_edr_connector_actions_and_rollback():
         recon_data = recon_resp.json()
         assert recon_data["status"] == "success"
         assert recon_data.get("details", {}).get("isolation_status") == "CONNECTED"
+
+@pytest.mark.asyncio
+async def test_react_investigation_trail():
+    """
+    Test autonomous multi-turn ReAct investigation trail generation during alert triage.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Trigger ransomware detection scenario
+        resp = await client.post("/api/v1/alerts/simulate?scenario=ransomware")
+        assert resp.status_code == 200
+        alert_data = resp.json()
+        assert alert_data["severity"] in ["high", "critical"]
+
+        # 2. Retrieve recent incidents and locate the generated incident
+        inc_resp = await client.get("/api/v1/incidents")
+        assert inc_resp.status_code == 200
+        incidents = inc_resp.json()
+        assert len(incidents) > 0
+        latest_inc = incidents[0]
+
+        # 3. Assert ReAct investigation trail presence and structure
+        ai_analysis = latest_inc.get("ai_analysis") or {}
+        trail = ai_analysis.get("investigation_trail", [])
+        assert len(trail) >= 2, f"Expected at least 2 ReAct investigation rounds, got {len(trail)}"
+
+        for step in trail:
+            assert "round" in step
+            assert "thought" in step and len(step["thought"]) > 0
+            assert "action" in step and len(step["action"]) > 0
+            assert "observation" in step
+
+@pytest.mark.asyncio
+async def test_incident_reinvestigate_endpoint():
+    """
+    Test interactive deep investigation endpoint with analyst query.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Get an existing incident
+        inc_resp = await client.get("/api/v1/incidents")
+        assert inc_resp.status_code == 200
+        incidents = inc_resp.json()
+        assert len(incidents) > 0
+        target_inc = incidents[0]
+        inc_id = target_inc["id"]
+
+        # 2. Trigger reanalyze with custom analyst inquiry
+        analyst_question = "Kiểm tra sâu hơn về tiến trình cha và trạng thái tài khoản liên quan"
+        reanalyze_resp = await client.post(
+            f"/api/v1/incidents/{inc_id}/reanalyze",
+            json={"analyst_query": analyst_question}
+        )
+        assert reanalyze_resp.status_code == 200
+        updated_inc = reanalyze_resp.json()
+
+        # 3. Verify that investigation trail includes the analyst inquiry
+        trail = updated_inc.get("ai_analysis", {}).get("investigation_trail", [])
+        assert len(trail) >= 3, f"Expected at least 3 rounds after analyst query, got {len(trail)}"
+        
+        # Verify that analyst inquiry is present in the trail
+        has_analyst_round = any(step.get("action") == "analyst_inquiry" for step in trail)
+        assert has_analyst_round, "Expected an 'analyst_inquiry' action in the investigation trail"

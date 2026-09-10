@@ -23,7 +23,7 @@ export const IncidentsAPI = {
   list: (params) => api.get('/incidents', { params }).then(r => r.data),
   get: (id) => api.get(`/incidents/${id}`).then(r => r.data),
   update: (id, data) => api.patch(`/incidents/${id}`, data).then(r => r.data),
-  reanalyze: (id) => api.post(`/incidents/${id}/reanalyze`).then(r => r.data),
+  reanalyze: (id, data = {}) => api.post(`/incidents/${id}/reanalyze`, data).then(r => r.data),
   unblock: (id, data = {}) => api.post(`/incidents/${id}/unblock`, data).then(r => r.data),
   delete: (id) => api.delete(`/incidents/${id}`).then(r => r.data),
 };

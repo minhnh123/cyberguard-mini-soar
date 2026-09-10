@@ -244,13 +244,17 @@ class ResponseService:
 
             for u, p in credentials_to_try:
                 try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=4.0)
+                    client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
                     active_user = u
                     active_pass = p
                     connected = True
                     break
+                except paramiko.AuthenticationException as ex:
+                    last_err = str(ex)
+                    continue
                 except Exception as ex:
                     last_err = str(ex)
+                    break
 
             if not connected:
                 return {
@@ -323,13 +327,17 @@ class ResponseService:
 
             for u, p in credentials_to_try:
                 try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=4.0)
+                    client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
                     active_user = u
                     active_pass = p
                     connected = True
                     break
+                except paramiko.AuthenticationException as ex:
+                    last_err = str(ex)
+                    continue
                 except Exception as ex:
                     last_err = str(ex)
+                    break
 
             if not connected:
                 return {
@@ -464,13 +472,17 @@ class ResponseService:
 
             for u, p in credentials_to_try:
                 try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=4.0)
+                    client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
                     active_user = u
                     active_pass = p
                     connected = True
                     break
+                except paramiko.AuthenticationException as ex:
+                    last_err = str(ex)
+                    continue
                 except Exception as ex:
                     last_err = str(ex)
+                    break
 
             if not connected:
                 return {

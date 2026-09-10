@@ -1,5 +1,6 @@
 import datetime
 from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -177,10 +178,18 @@ async def update_incident(
     await db.refresh(inc)
     return inc
 
+class ReanalyzeIncidentRequest(BaseModel):
+    analyst_query: Optional[str] = None
+    deep_investigation: bool = True
+
 @router.post("/{incident_id}/reanalyze")
-async def reanalyze_incident_ai(incident_id: int, db: AsyncSession = Depends(get_db)):
+async def reanalyze_incident_ai(
+    incident_id: int,
+    payload: Optional[ReanalyzeIncidentRequest] = None,
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Trigger manual AI re-triage and threat intel enrichment for this incident.
+    Trigger manual or interactive AI ReAct re-triage and threat intel enrichment for this incident.
     """
     result = await db.execute(
         select(Incident).where(Incident.id == incident_id).options(selectinload(Incident.alerts))
@@ -211,11 +220,13 @@ async def reanalyze_incident_ai(incident_id: int, db: AsyncSession = Depends(get
         "domain": first_alert.domain,
         "agent_id": first_alert.agent_id,
         "hostname": first_alert.hostname,
+        "user": first_alert.user,
         "description": first_alert.description,
         "raw_payload": first_alert.raw_payload
     }
 
-    ai_res = await AIService.triage_alert(alert_dict, enrichment, db=db)
+    analyst_query = payload.analyst_query if payload else None
+    ai_res = await AIService.triage_alert(alert_dict, enrichment, db=db, analyst_query=analyst_query)
 
     inc.severity = ai_res.get("severity", inc.severity)
     inc.summary = ai_res.get("attack_narrative")
@@ -226,8 +237,34 @@ async def reanalyze_incident_ai(incident_id: int, db: AsyncSession = Depends(get
     inc.ai_analysis = ai_res
     inc.updated_at = datetime.datetime.utcnow()
 
+    # Record in ActionLog
+    action_log = ActionLog(
+        incident_id=inc.id,
+        action_type="ai_react_reinvestigate",
+        connector="ai",
+        target=inc.incident_number,
+        status="success",
+        output_message=f"AI ReAct Deep Investigation completed ({len(ai_res.get('investigation_trail', []))} rounds)",
+        executed_by=f"SOC Analyst ({analyst_query})" if analyst_query else "SOC Analyst (Re-Analyze)"
+    )
+    db.add(action_log)
+
     await db.commit()
     await db.refresh(inc)
+
+    # Broadcast WebSocket update
+    try:
+        await ws_manager.broadcast("INCIDENT_UPDATED", {
+            "incident_id": inc.id,
+            "severity": inc.severity,
+            "status": inc.status,
+            "summary": inc.summary,
+            "confidence_score": inc.confidence_score,
+            "ai_analysis": inc.ai_analysis
+        })
+    except Exception:
+        pass
+
     return inc
 
 @router.post("/{incident_id}/unblock")
