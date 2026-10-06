@@ -181,3 +181,33 @@ class SystemSettingUpdate(BaseModel):
     category: str = "general"
     is_secret: bool = False
     description: Optional[str] = None
+
+# Active Learning Feedback & Suppression Schemas
+class FeedbackCreateRequest(BaseModel):
+    verdict: str  # false_positive, true_positive, over_containment, misclassified
+    analyst_notes: str
+    reason_category: Optional[str] = "general"
+    corrected_severity: Optional[str] = None
+    auto_suppress_hours: Optional[int] = 24
+    created_by: Optional[str] = "SOC Analyst"
+
+class SuppressionRuleCreateRequest(BaseModel):
+    entity_type: str  # ip, user, hash, domain, title_pattern
+    entity_value: str
+    reason: str
+    duration_hours: Optional[int] = 24
+
+class SuppressionRuleResponse(BaseModel):
+    id: int
+    entity_type: str
+    entity_value: str
+    reason: Optional[str] = None
+    created_by: str
+    created_at: datetime.datetime
+    expires_at: Optional[datetime.datetime] = None
+    is_active: bool
+    hit_count: int
+    last_hit_at: Optional[datetime.datetime] = None
+
+    class Config:
+        from_attributes = True

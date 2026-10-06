@@ -136,6 +136,15 @@ Enrichment & Threat Intelligence:
 Preliminary MITRE ATT&CK matches:
 {json.dumps(local_mitre, indent=2)}
 """
+        # Load Few-Shot In-Context Learning from historical analyst feedback
+        try:
+            from app.services.feedback_service import FeedbackService
+            few_shot_context = await FeedbackService.get_few_shot_prompt_context(alert_data, limit=3, db=db)
+            if few_shot_context:
+                prompt_content += f"\n{few_shot_context}\n"
+        except Exception:
+            pass
+
         if analyst_query:
             prompt_content += f"\nSpecial Analyst Investigation Directives: {analyst_query}\n"
 
@@ -412,6 +421,25 @@ Preliminary MITRE ATT&CK matches:
         false_positive_score = 0.05
         is_false_positive = False
         recommended_actions = []
+
+        # Check Active Learning feedback history for matching False Positives
+        if db:
+            try:
+                from app.models.models import AIFeedbackRecord
+                fb_res = await db.execute(
+                    select(AIFeedbackRecord)
+                    .where(AIFeedbackRecord.analyst_verdict == "false_positive")
+                    .order_by(AIFeedbackRecord.created_at.desc())
+                    .limit(5)
+                )
+                for fp in fb_res.scalars().all():
+                    if fp.reason_category and fp.reason_category in title:
+                        false_positive_score = 0.85
+                        confidence = 0.35
+                        is_false_positive = True
+                        break
+            except Exception:
+                pass
 
         # Execute ReAct autonomous investigation trail
         investigation_trail = await cls._build_react_investigation_trail(alert, enrichment, db=db, analyst_query=analyst_query)

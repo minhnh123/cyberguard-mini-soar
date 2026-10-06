@@ -124,20 +124,24 @@ def normalize_alert_payload(raw_json: Dict[str, Any]) -> Dict[str, Any]:
     if severity not in ["critical", "high", "medium", "low", "info"]:
         severity = "medium"
 
+    inner = raw_json.get("raw_data") or raw_json.get("data")
+    if not isinstance(inner, dict):
+        inner = {}
+
     return {
         "title": sanitize_text(title, 255),
-        "description": sanitize_text(raw_json.get("description") or raw_json.get("details"), 2000),
+        "description": sanitize_text(raw_json.get("description") or raw_json.get("details") or inner.get("description"), 2000),
         "severity": severity,
         "source": sanitize_identifier(raw_json.get("source", "Webhook"), 64) or "Webhook",
-        "source_ip": sanitize_ip(raw_json.get("source_ip") or raw_json.get("src_ip") or raw_json.get("client_ip")),
-        "destination_ip": sanitize_ip(raw_json.get("destination_ip") or raw_json.get("dest_ip") or raw_json.get("target_ip")),
-        "file_hash": sanitize_hash(raw_json.get("file_hash") or raw_json.get("hash") or raw_json.get("sha256")),
-        "domain": sanitize_text(raw_json.get("domain") or raw_json.get("hostname"), 255),
-        "url": sanitize_text(raw_json.get("url"), 1000),
-        "agent_id": sanitize_identifier(raw_json.get("agent_id"), 64),
-        "hostname": sanitize_identifier(raw_json.get("hostname"), 128),
-        "user": sanitize_identifier(raw_json.get("user") or raw_json.get("username"), 128),
-        "rule_id": sanitize_identifier(raw_json.get("rule_id", ""), 64),
+        "source_ip": sanitize_ip(raw_json.get("source_ip") or raw_json.get("src_ip") or raw_json.get("client_ip") or inner.get("source_ip") or inner.get("src_ip")),
+        "destination_ip": sanitize_ip(raw_json.get("destination_ip") or raw_json.get("dest_ip") or raw_json.get("target_ip") or inner.get("destination_ip") or inner.get("dest_ip")),
+        "file_hash": sanitize_hash(raw_json.get("file_hash") or raw_json.get("hash") or raw_json.get("sha256") or inner.get("process_hash") or inner.get("file_hash") or inner.get("hash")),
+        "domain": sanitize_text(raw_json.get("domain") or inner.get("domain") or raw_json.get("hostname"), 255),
+        "url": sanitize_text(raw_json.get("url") or inner.get("url"), 1000),
+        "agent_id": sanitize_identifier(raw_json.get("agent_id") or inner.get("agent_id"), 64),
+        "hostname": sanitize_identifier(raw_json.get("hostname") or raw_json.get("host") or inner.get("hostname") or inner.get("host"), 128),
+        "user": sanitize_identifier(raw_json.get("user") or raw_json.get("username") or inner.get("user") or inner.get("username"), 128),
+        "rule_id": sanitize_identifier(raw_json.get("rule_id") or inner.get("rule_id", ""), 64),
         "raw_payload": raw_json
     }
 
@@ -262,6 +266,19 @@ async def process_alert_ingestion(raw_payload: Dict[str, Any], db: AsyncSession)
     await db.commit()
     await db.refresh(new_alert)
 
+    # 1.5 Kiểm tra quy tắc dập tắt cảnh báo (Dynamic Alert Suppression)
+    from app.services.suppression_service import SuppressionService
+    from app.services.knowledge_graph import KnowledgeGraphService
+
+    is_suppressed, matched_rule = await SuppressionService.is_alert_suppressed(normalized, db)
+    if is_suppressed:
+        new_alert.status = "suppressed"
+        rule_desc = matched_rule.reason if matched_rule else "Suppressed by active filter"
+        new_alert.description = f"[SUPPRESSED: {rule_desc}] " + (new_alert.description or "")
+        await db.commit()
+        await db.refresh(new_alert)
+        return new_alert
+
     # 2. Kiểm tra cửa sổ tương quan (Alert Deduplication / Correlation Window)
     existing_incident = await find_correlated_incident(normalized, db)
 
@@ -280,6 +297,12 @@ async def process_alert_ingestion(raw_payload: Dict[str, Any], db: AsyncSession)
 
         await db.commit()
         await db.refresh(new_alert)
+
+        # Ingest vào Knowledge Graph
+        try:
+            await KnowledgeGraphService.extract_and_ingest_graph(normalized, incident_id=existing_incident.id, db=db)
+        except Exception:
+            pass
 
         # Broadcast sự kiện WebSocket
         try:
@@ -317,6 +340,12 @@ async def process_alert_ingestion(raw_payload: Dict[str, Any], db: AsyncSession)
     new_alert.incident_id = new_incident.id
     new_alert.status = "processing"
     await db.commit()
+
+    # Ingest vào Knowledge Graph
+    try:
+        await KnowledgeGraphService.extract_and_ingest_graph(normalized, incident_id=new_incident.id, db=db)
+    except Exception:
+        pass
 
     # 4. Kích hoạt động cơ Playbook tự động
     await PlaybookEngine.match_and_trigger(new_alert, new_incident, db)

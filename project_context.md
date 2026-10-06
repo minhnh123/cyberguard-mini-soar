@@ -89,17 +89,20 @@ d:\soar\
 │   │   ├── services\                  # CÁC DỊCH VỤ NGHIỆP VỤ LÕI
 │   │   │   ├── ai_service.py          # ReAct Autonomous Investigation & LLM Triage
 │   │   │   ├── enrichment_service.py  # Làm giàu CTI (IP-API, VirusTotal v3 Cache)
+│   │   │   ├── feedback_service.py    # RLHF Active Learning Feedback Loop & Few-Shot In-Context Engine
 │   │   │   ├── guardrail_service.py   # Safety Guardrails & Blast Radius Mitigation
 │   │   │   ├── ingestion_queue.py     # High-throughput Buffer & Backpressure Queue
 │   │   │   ├── investigation_tools.py # 5 Công cụ Điều tra Hệ thống Thực tế cho AI
+│   │   │   ├── knowledge_graph.py     # Observable Knowledge Graph & Multi-Hop BFS Blast Radius Traversal
 │   │   │   ├── mitre_service.py       # Ánh xạ Chiến thuật & Kỹ thuật MITRE
 │   │   │   ├── playbook_engine.py     # Checkpoint State Machine & Graph Execution Engine
 │   │   │   ├── queue_worker.py        # Background Batch Consumer Worker cho Alert Ingestion
 │   │   │   ├── response_service.py    # Điều phối SSH iptables, Wazuh AR, Identity, EDR
+│   │   │   ├── suppression_service.py # Dynamic Alert Suppression Engine & Wildcard Pattern Filter
 │   │   │   └── ttl_worker.py          # Tiến trình nền Auto-Rollback TTL
 │   │   └── main.py                    # Điểm khởi động FastAPI App, Lifespan & Workers
 │   ├── tests\
-│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (22/22 tests passing)
+│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (25/25 tests passing 100%)
 │   ├── requirements.txt               # Thư viện Python phụ thuộc
 │   └── soar.db                        # Cơ sở dữ liệu SQLite Async (WAL Mode)
 ├── frontend\                          # FRONTEND REACT + VITE + TAILWINDCSS

@@ -192,3 +192,72 @@ class ThreatIntelCache(Base):
     malicious_score = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     expires_at = Column(DateTime, nullable=True)
+
+
+class ObservableEntity(Base):
+    """
+    Observable Knowledge Graph Entity node representing an IP, Host, User, Domain, or Hash.
+    """
+    __tablename__ = "observable_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(32), index=True, nullable=False)  # ip, host, user, domain, hash
+    value = Column(String(255), index=True, nullable=False)
+    reputation = Column(String(32), default="unknown")            # malicious, suspicious, benign, unknown
+    metadata_json = Column(JSON, default=dict)
+    first_seen = Column(DateTime, default=datetime.datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    incident_count = Column(Integer, default=1)
+
+
+class EntityRelation(Base):
+    """
+    Observable Knowledge Graph Edge representing a connection between two entities.
+    """
+    __tablename__ = "entity_relations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_entity_id = Column(Integer, ForeignKey("observable_entities.id", ondelete="CASCADE"), index=True, nullable=False)
+    target_entity_id = Column(Integer, ForeignKey("observable_entities.id", ondelete="CASCADE"), index=True, nullable=False)
+    relation_type = Column(String(64), index=True, nullable=False) # COMMUNICATED_WITH, LOGGED_INTO, TARGETED, LOCATED_ON, AUTHENTICATED_AS
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True, index=True)
+    weight = Column(Float, default=1.0)
+    context_metadata = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class SuppressionRule(Base):
+    """
+    Dynamic Alert Suppression rule created from SOC Analyst feedback or manual tuning.
+    """
+    __tablename__ = "suppression_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(32), index=True, nullable=False)  # ip, user, hash, domain, title_pattern
+    entity_value = Column(String(255), index=True, nullable=False)
+    reason = Column(Text, nullable=True)
+    created_by = Column(String(128), default="Analyst")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    hit_count = Column(Integer, default=0)
+    last_hit_at = Column(DateTime, nullable=True)
+
+
+class AIFeedbackRecord(Base):
+    """
+    RLHF Active Learning feedback dataset from SOC Analyst verdicts for Few-Shot In-Context Prompting.
+    """
+    __tablename__ = "ai_feedback_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), index=True, nullable=False)
+    analyst_verdict = Column(String(64), index=True, nullable=False) # false_positive, true_positive, over_containment, misclassified
+    reason_category = Column(String(64), nullable=True)
+    analyst_notes = Column(Text, nullable=True)
+    original_summary = Column(Text, nullable=True)
+    original_severity = Column(String(32), nullable=True)
+    corrected_severity = Column(String(32), nullable=True)
+    created_by = Column(String(128), default="Analyst")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+

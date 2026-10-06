@@ -787,3 +787,216 @@ async def test_settings_api_vault_encryption_and_actionlog_redaction():
         assert kp_data["status"] == "success"
         assert kp_data["public_key"].startswith("ssh-ed25519 ")
 
+@pytest.mark.asyncio
+async def test_observable_knowledge_graph_and_blast_radius():
+    """
+    Test Phase 3 Observable Knowledge Graph:
+    - Ingests an alert with enriched multi-domain observables (IP, Host, User, Hash).
+    - Verifies graph construction, node extraction, and relationship topology.
+    - Tests multi-hop BFS Blast Radius calculation and entity cross-incident query.
+    """
+    import uuid
+    suffix = uuid.uuid4().hex[:4]
+    test_src_ip = f"198.51.100.{int(suffix, 16) % 200 + 10}"
+    test_host = f"SRV-DC-{suffix.upper()}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Ingest alert with rich observables
+        alert_payload = {
+            "title": f"Lateral Movement via SMB Admin Session {suffix}",
+            "source": "Wazuh-EDR",
+            "severity": "high",
+            "source_ip": test_src_ip,
+            "destination_ip": "10.0.0.15",
+            "description": "Lateral movement detected from attacker IP to internal server",
+            "raw_data": {
+                "host": test_host,
+                "user": "sec_admin",
+                "process_hash": "44d88612fea8a8f36de82e1278abb02f",
+                "domain": "corp.internal"
+            }
+        }
+        ingest_resp = await client.post("/api/v1/alerts/webhook", json=alert_payload)
+        assert ingest_resp.status_code == 200
+        alert_data = ingest_resp.json()
+        inc_id = alert_data.get("incident_id")
+        assert inc_id is not None
+
+        # 2. Query Knowledge Graph for this incident
+        graph_resp = await client.get(f"/api/v1/incidents/{inc_id}/graph?max_hops=2")
+        assert graph_resp.status_code == 200
+        graph_data = graph_resp.json()
+
+        assert graph_data["incident_id"] == inc_id
+        assert graph_data["total_nodes"] >= 2
+        assert graph_data["total_edges"] >= 1
+        assert "blast_radius" in graph_data
+
+        blast = graph_data["blast_radius"]
+        assert blast["score"] >= 20
+        assert blast["risk_level"] in ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+        assert any(n["label"] == test_src_ip for n in graph_data["nodes"])
+
+        # 3. Test entity-centric cross-incident graph query
+        entity_resp = await client.get(f"/api/v1/incidents/graph/entity?value={test_src_ip}&max_hops=2")
+        assert entity_resp.status_code == 200
+        ent_graph = entity_resp.json()
+        assert ent_graph["root_entity"]["value"] == test_src_ip
+        assert len(ent_graph["nodes"]) >= 1
+
+@pytest.mark.asyncio
+async def test_dynamic_alert_suppression_engine():
+    """
+    Test Phase 3 Dynamic Alert Suppression Engine:
+    - Registers suppression rules for pattern wildcards and specific IP IOCs.
+    - Verifies that incoming matching alerts are automatically suppressed (no incident created).
+    - Verifies non-matching alerts flow normally.
+    - Verifies suppression rule listing and deactivation.
+    """
+    import uuid
+    uid = uuid.uuid4().hex[:4]
+    test_pattern = f"*Nightly Backup Routine {uid}*"
+    test_ip = f"192.0.2.{int(uid, 16) % 200 + 10}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Create a pattern-based suppression rule
+        rule_payload = {
+            "entity_type": "title_pattern",
+            "entity_value": test_pattern,
+            "reason": "Scheduled backup routine generates false positive I/O spikes",
+            "duration_hours": 12
+        }
+        create_resp = await client.post("/api/v1/incidents/suppressions/rules", json=rule_payload)
+        assert create_resp.status_code == 200
+        rule_data = create_resp.json()
+        rule_id = rule_data["id"]
+        assert rule_data["entity_type"] == "title_pattern"
+        assert rule_data["is_active"] is True
+
+        # 2. Ingest an alert matching the title pattern
+        suppressed_alert_payload = {
+            "title": f"Alert: Nightly Backup Routine {uid} Disk Spikes",
+            "source": "Wazuh",
+            "severity": "medium",
+            "source_ip": "10.0.0.99",
+            "description": "Routine backup volume activity"
+        }
+        sup_resp = await client.post("/api/v1/alerts/webhook", json=suppressed_alert_payload)
+        assert sup_resp.status_code == 200
+        sup_data = sup_resp.json()
+        assert sup_data["status"] == "suppressed"
+        assert sup_data.get("incident_id") is None
+        assert "[SUPPRESSED: Scheduled backup routine" in sup_data["description"]
+
+        # 3. Create an IP-based suppression rule
+        ip_rule_payload = {
+            "entity_type": "ip",
+            "entity_value": test_ip,
+            "reason": "Authorized internal vulnerability scanner IP",
+            "duration_hours": 24
+        }
+        ip_rule_resp = await client.post("/api/v1/incidents/suppressions/rules", json=ip_rule_payload)
+        assert ip_rule_resp.status_code == 200
+
+        # Ingest alert from suppressed IP
+        ip_alert_payload = {
+            "title": f"Suspicious Port Scan Activity {uid}",
+            "source": "Suricata",
+            "severity": "high",
+            "source_ip": test_ip,
+            "description": "Port scanning from scanner IP"
+        }
+        sup_ip_resp = await client.post("/api/v1/alerts/webhook", json=ip_alert_payload)
+        assert sup_ip_resp.status_code == 200
+        sup_ip_data = sup_ip_resp.json()
+        assert sup_ip_data["status"] == "suppressed"
+        assert sup_ip_data.get("incident_id") is None
+
+        # 4. List suppression rules
+        list_resp = await client.get("/api/v1/incidents/suppressions/rules?active_only=true")
+        assert list_resp.status_code == 200
+        rules_list = list_resp.json()
+        assert any(r["id"] == rule_id for r in rules_list)
+
+        # 5. Deactivate suppression rule
+        del_resp = await client.delete(f"/api/v1/incidents/suppressions/rules/{rule_id}")
+        assert del_resp.status_code == 200
+        del_data = del_resp.json()
+        assert del_data["status"] == "success"
+
+@pytest.mark.asyncio
+async def test_rlhf_analyst_feedback_loop_and_few_shot_prompt():
+    """
+    Test Phase 3 RLHF Active Learning Feedback Loop:
+    - Submits analyst verdict (False Positive) on an incident.
+    - Verifies incident closure and automated creation of dynamic suppression rule.
+    - Verifies Few-Shot In-Context prompt snippet generation for AI Triage.
+    """
+    from app.core.database import AsyncSessionLocal
+    from app.services.feedback_service import FeedbackService
+    from app.models.models import Incident, SuppressionRule
+    from sqlalchemy.future import select
+    import uuid
+
+    suffix = uuid.uuid4().hex[:4]
+    fresh_test_ip = f"198.51.100.{int(suffix, 16) % 200 + 10}"
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Ingest a clean alert to get a fresh incident
+        alert_payload = {
+            "title": f"Unusual Bastion Activity {suffix}",
+            "source": "Wazuh",
+            "severity": "medium",
+            "source_ip": fresh_test_ip,
+            "description": "Login activity to bastion server"
+        }
+        ingest_resp = await client.post("/api/v1/alerts/webhook", json=alert_payload)
+        assert ingest_resp.status_code == 200
+        alert_data = ingest_resp.json()
+        inc_id = alert_data.get("incident_id")
+        assert inc_id is not None
+
+        # 2. Submit False Positive analyst feedback
+        feedback_payload = {
+            "verdict": "false_positive",
+            "analyst_notes": f"Legitimate pen-test execution {suffix} verified with SecOps team",
+            "reason_category": "authorized_testing",
+            "corrected_severity": "info",
+            "auto_suppress_hours": 48,
+            "created_by": "lead_soc_analyst"
+        }
+        fb_resp = await client.post(f"/api/v1/incidents/{inc_id}/feedback", json=feedback_payload)
+        assert fb_resp.status_code == 200
+        fb_data = fb_resp.json()
+        assert fb_data["status"] == "success"
+        assert "feedback_id" in fb_data
+
+        # 3. Verify Incident status in DB: closed with false_positive_score=1.0
+        async with AsyncSessionLocal() as session:
+            inc_res = await session.execute(select(Incident).where(Incident.id == inc_id))
+            inc_row = inc_res.scalars().first()
+            assert inc_row.status == "closed"
+            assert inc_row.false_positive_score == 1.0
+
+            # 4. Verify that an automated suppression rule was generated for the source IP
+            sup_res = await session.execute(
+                select(SuppressionRule).where(
+                    SuppressionRule.entity_value == fresh_test_ip,
+                    SuppressionRule.is_active == True
+                )
+            )
+            sup_row = sup_res.scalars().first()
+            assert sup_row is not None
+            assert "Auto-suppressed from False Positive" in sup_row.reason
+
+            # 5. Verify Few-Shot In-Context prompt snippet generation
+            few_shot_prompt = await FeedbackService.get_few_shot_prompt_context(alert_dict={}, limit=3, db=session)
+            assert "SOC ANALYST HISTORICAL FEEDBACK" in few_shot_prompt
+            assert "authorized_testing" in few_shot_prompt
+            assert "false_positive" in few_shot_prompt.lower()
+
+
+

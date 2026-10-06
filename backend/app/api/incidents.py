@@ -8,8 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, func
 
 from app.core.database import get_db
-from app.models.models import Incident, Alert, PendingApproval, ActionLog, PlaybookExecution
-from app.schemas.schemas import IncidentResponse
+from app.models.models import Incident, Alert, PendingApproval, ActionLog, PlaybookExecution, SuppressionRule, AIFeedbackRecord
+from app.schemas.schemas import (
+    IncidentResponse, FeedbackCreateRequest, SuppressionRuleCreateRequest, SuppressionRuleResponse
+)
 from app.services.ai_service import AIService
 from app.services.enrichment_service import EnrichmentService
 from app.services.response_service import ResponseService
@@ -386,3 +388,121 @@ async def delete_incident(incident_id: int, db: AsyncSession = Depends(get_db)):
     await db.delete(inc)
     await db.commit()
     return {"status": "deleted", "id": incident_id}
+
+@router.get("/{incident_id}/graph")
+async def get_incident_knowledge_graph(
+    incident_id: int,
+    max_hops: int = 2,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Returns the multi-hop Observable Knowledge Graph and calculated Blast Radius for an incident.
+    """
+    res = await db.execute(select(Incident).where(Incident.id == incident_id))
+    inc = res.scalars().first()
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.knowledge_graph import KnowledgeGraphService
+    return await KnowledgeGraphService.get_incident_subgraph(incident_id, max_hops=max_hops, db=db)
+
+@router.post("/{incident_id}/feedback")
+async def submit_incident_feedback(
+    incident_id: int,
+    payload: FeedbackCreateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Submits RLHF Active Learning feedback (False/True Positive, Over-containment)
+    and optionally spawns an automated suppression rule.
+    """
+    res = await db.execute(select(Incident).where(Incident.id == incident_id))
+    inc = res.scalars().first()
+    if not inc:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    from app.services.feedback_service import FeedbackService
+    feedback = await FeedbackService.record_feedback(
+        incident_id=incident_id,
+        verdict=payload.verdict,
+        analyst_notes=payload.analyst_notes,
+        reason_category=payload.reason_category,
+        corrected_severity=payload.corrected_severity,
+        auto_suppress_hours=payload.auto_suppress_hours,
+        created_by=payload.created_by or "SOC Analyst",
+        db=db
+    )
+    if not feedback:
+        raise HTTPException(status_code=400, detail="Failed to record feedback")
+
+    # Broadcast WebSocket update
+    try:
+        await ws_manager.broadcast("INCIDENT_FEEDBACK_RECORDED", {
+            "incident_id": incident_id,
+            "verdict": feedback.analyst_verdict,
+            "reason_category": feedback.reason_category,
+            "analyst_notes": feedback.analyst_notes
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "message": f"Recorded feedback '{payload.verdict}' successfully.",
+        "feedback_id": feedback.id
+    }
+
+@router.get("/graph/entity")
+async def get_entity_knowledge_graph(
+    value: str = Query(..., description="Entity value (IP, Host, User, Domain, Hash)"),
+    max_hops: int = 2,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Traverses the knowledge graph starting from a specific entity to uncover cross-incident relationships.
+    """
+    from app.services.knowledge_graph import KnowledgeGraphService
+    return await KnowledgeGraphService.get_entity_graph(value, max_hops=max_hops, db=db)
+
+@router.get("/suppressions/rules", response_model=List[SuppressionRuleResponse])
+async def list_suppression_rules(
+    active_only: bool = True,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lists dynamic alert suppression rules.
+    """
+    from app.services.suppression_service import SuppressionService
+    return await SuppressionService.list_rules(active_only=active_only, db=db)
+
+@router.post("/suppressions/rules", response_model=SuppressionRuleResponse)
+async def create_suppression_rule(
+    payload: SuppressionRuleCreateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually creates a dynamic alert suppression rule with auto-expiry TTL.
+    """
+    from app.services.suppression_service import SuppressionService
+    return await SuppressionService.create_suppression_rule(
+        entity_type=payload.entity_type,
+        entity_value=payload.entity_value,
+        reason=payload.reason,
+        duration_hours=payload.duration_hours,
+        db=db
+    )
+
+@router.delete("/suppressions/rules/{rule_id}")
+async def delete_suppression_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Deactivates a dynamic alert suppression rule.
+    """
+    from app.services.suppression_service import SuppressionService
+    success = await SuppressionService.delete_rule(rule_id, db=db)
+    if not success:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return {"status": "success", "message": f"Deactivated suppression rule #{rule_id}"}
+
