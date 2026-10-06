@@ -229,6 +229,9 @@ class PlaybookEngine:
                             reason = f"[GUARDRAIL WARNING: Protected Critical IP] {reason} - {guardrail_check.get('reason')}"
                             risk_level = "critical"
 
+                        from app.services.rbac_service import RBACService
+                        dual_req = RBACService.is_dual_custody_required(action_type, risk_level, target, rec.get("parameters", {}))
+
                         approval = PendingApproval(
                             incident_id=incident.id,
                             playbook_execution_id=execution.id,
@@ -239,6 +242,8 @@ class PlaybookEngine:
                             reason=reason,
                             risk_level=risk_level,
                             ttl_minutes=60,
+                            requires_dual_custody=dual_req,
+                            dual_custody_status="awaiting_first_approval" if dual_req else "not_required",
                             status="pending"
                         )
                         db.add(approval)

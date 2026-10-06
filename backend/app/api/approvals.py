@@ -43,6 +43,58 @@ async def handle_approval_decision(
     approval.analyst_note = request.analyst_note
     approval.resolved_at = datetime.datetime.utcnow()
 
+    # 1. Safety Guardrails MUST be validated FIRST on approve!
+    if request.decision.lower() == "approve":
+        from app.services.guardrail_service import GuardrailService
+        safety_check = await GuardrailService.validate_action_safety(
+            target=approval.target,
+            action_type=approval.action_type,
+            connector=approval.connector,
+            db=db
+        )
+        if not safety_check.get("allowed", True):
+            raise HTTPException(
+                status_code=400,
+                detail=safety_check.get("reason", f"Action on target {approval.target} violated Safety Guardrails.")
+            )
+
+    # 2. RBAC & Dual-Custody Evaluation
+    from app.services.rbac_service import RBACService
+    approver = request.approver or "analyst"
+    approver_role = request.approver_role or "tier2_responder"
+
+    rbac_eval = RBACService.evaluate_dual_custody(
+        approval=approval,
+        approver=approver,
+        approver_role=approver_role,
+        decision=request.decision
+    )
+
+    if not rbac_eval.get("allowed", False):
+        raise HTTPException(status_code=403, detail=rbac_eval.get("reason", "Permission denied"))
+
+    if not rbac_eval.get("is_final", False):
+        # First signature recorded, awaiting second signature (Dual-Custody)
+        await db.commit()
+        await db.refresh(approval)
+        try:
+            await ws_manager.broadcast("APPROVAL_FIRST_SIGNATURE", {
+                "approval_id": approval.id,
+                "first_approver": approval.first_approver,
+                "first_approver_role": approval.first_approver_role,
+                "dual_custody_status": approval.dual_custody_status,
+                "message": rbac_eval.get("message")
+            })
+        except Exception:
+            pass
+        return {
+            "status": "awaiting_second_approval",
+            "message": rbac_eval.get("message"),
+            "approval_id": approval.id,
+            "dual_custody_status": approval.dual_custody_status,
+            "first_approver": approval.first_approver
+        }
+
     if request.decision.lower() == "reject":
         approval.status = "rejected"
         await db.commit()
@@ -59,25 +111,11 @@ async def handle_approval_decision(
             pass
         return {
             "status": "rejected",
-            "message": f"Action {approval.action_type} on {approval.target} was rejected by Analyst.",
+            "message": f"Action {approval.action_type} on {approval.target} was rejected by {approver}.",
             "approval_id": approval.id
         }
 
     elif request.decision.lower() == "approve":
-        # Check Safety Guardrails before approving
-        from app.services.guardrail_service import GuardrailService
-        safety_check = await GuardrailService.validate_action_safety(
-            target=approval.target,
-            action_type=approval.action_type,
-            connector=approval.connector,
-            db=db
-        )
-        if not safety_check.get("allowed", True):
-            raise HTTPException(
-                status_code=400,
-                detail=safety_check.get("reason", f"Action on target {approval.target} violated Safety Guardrails.")
-            )
-
         # Calculate TTL & Expiration
         ttl_minutes = request.ttl_minutes if (request.ttl_minutes is not None and request.ttl_minutes > 0) else None
         expires_at = (approval.resolved_at + datetime.timedelta(minutes=ttl_minutes)) if ttl_minutes else None
@@ -108,13 +146,30 @@ async def handle_approval_decision(
             target=approval.target,
             status=exec_status,
             output_message=exec_res.get("message"),
-            executed_by="Analyst Approved",
+            executed_by=f"Approved by {approval.first_approver or approver}" + (f" & {approval.second_approver}" if approval.second_approver else ""),
             ttl_minutes=ttl_minutes,
             expires_at=expires_at,
             is_expired=False,
             rollback_status="active" if (ttl_minutes and exec_status in ["success", "live", "dry_run"]) else None
         )
         db.add(action_log)
+
+        # Record Desired Security State for Closed-Loop Reconciliation
+        if exec_status in ["success", "live", "dry_run", "live_success"]:
+            from app.services.reconciliation_service import ReconciliationService
+            try:
+                await ReconciliationService.record_desired_state(
+                    incident_id=approval.incident_id,
+                    action_type=approval.action_type,
+                    connector=approval.connector,
+                    target=approval.target,
+                    expected_status="BLOCKED" if "block" in approval.action_type else "ISOLATED",
+                    parameters=approval.parameters or {},
+                    auto_heal=True,
+                    db=db
+                )
+            except Exception as rc_err:
+                print(f"[Reconciler Warning] Could not record desired state: {rc_err}")
 
         # If incident status was open/investigating, and this was an isolation or block, update incident
         inc_res = await db.execute(select(Incident).where(Incident.id == approval.incident_id))
@@ -227,11 +282,22 @@ async def handle_approval_rollback(
     )
     db.add(action_log)
 
-    # Update approval record status
     approval.status = "reverted"
     existing_note = approval.analyst_note or ""
     approval.analyst_note = f"{existing_note} | Hoàn tác: {analyst_note}".strip(" |")
     approval.resolved_at = datetime.datetime.utcnow()
+
+    # Deactivate Desired Security State in Reconciliation Engine
+    from app.services.reconciliation_service import ReconciliationService
+    try:
+        await ReconciliationService.deactivate_desired_state(
+            target=approval.target,
+            connector=approval.connector,
+            action_type=approval.action_type,
+            db=db
+        )
+    except Exception as rc_err:
+        print(f"[Reconciler Warning] Could not deactivate desired state: {rc_err}")
 
     await db.commit()
 

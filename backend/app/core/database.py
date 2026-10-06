@@ -56,7 +56,16 @@ async def init_db():
             "ALTER TABLE playbook_executions ADD COLUMN context_state JSON",
             "ALTER TABLE playbook_executions ADD COLUMN checkpoint_history JSON",
             "ALTER TABLE playbook_executions ADD COLUMN is_resumable BOOLEAN DEFAULT 1",
-            "ALTER TABLE playbook_executions ADD COLUMN error_message TEXT"
+            "ALTER TABLE playbook_executions ADD COLUMN error_message TEXT",
+            # Phase 4: Dual-Custody 4-Eyes Migrations
+            "ALTER TABLE pending_approvals ADD COLUMN requires_dual_custody BOOLEAN DEFAULT 0",
+            "ALTER TABLE pending_approvals ADD COLUMN first_approver VARCHAR(128)",
+            "ALTER TABLE pending_approvals ADD COLUMN first_approver_role VARCHAR(64)",
+            "ALTER TABLE pending_approvals ADD COLUMN first_approved_at DATETIME",
+            "ALTER TABLE pending_approvals ADD COLUMN second_approver VARCHAR(128)",
+            "ALTER TABLE pending_approvals ADD COLUMN second_approver_role VARCHAR(64)",
+            "ALTER TABLE pending_approvals ADD COLUMN second_approved_at DATETIME",
+            "ALTER TABLE pending_approvals ADD COLUMN dual_custody_status VARCHAR(32) DEFAULT 'not_required'"
         ]
         for m in migrations:
             try:

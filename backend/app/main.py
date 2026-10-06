@@ -15,6 +15,7 @@ from app.api.connectors import router as connectors_router
 from app.api.settings import router as settings_router
 from app.api.stats import router as stats_router
 from app.api.mitre import router as mitre_router
+from app.api.reconciliation import router as reconciliation_router
 
 import asyncio
 from app.services.ttl_worker import start_ttl_worker
@@ -96,6 +97,7 @@ app.include_router(threat_intel_router, prefix=settings.API_V1_STR)
 app.include_router(connectors_router, prefix=settings.API_V1_STR)
 app.include_router(settings_router, prefix=settings.API_V1_STR)
 app.include_router(mitre_router, prefix=settings.API_V1_STR)
+app.include_router(reconciliation_router, prefix=settings.API_V1_STR)
 
 # Real-time WebSocket Event Stream
 @app.websocket(f"{settings.API_V1_STR}/ws/events")

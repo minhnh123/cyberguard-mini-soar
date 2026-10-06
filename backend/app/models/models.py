@@ -132,6 +132,16 @@ class PendingApproval(Base):
     expires_at = Column(DateTime, nullable=True)
     is_expired = Column(Boolean, default=False)
     
+    # Dual-Custody & 4-Eyes Principle Fields
+    requires_dual_custody = Column(Boolean, default=False)
+    first_approver = Column(String(128), nullable=True)
+    first_approver_role = Column(String(64), nullable=True)
+    first_approved_at = Column(DateTime, nullable=True)
+    second_approver = Column(String(128), nullable=True)
+    second_approver_role = Column(String(64), nullable=True)
+    second_approved_at = Column(DateTime, nullable=True)
+    dual_custody_status = Column(String(32), default="not_required") # not_required, awaiting_second_approval, fully_approved
+
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)
 
@@ -260,4 +270,31 @@ class AIFeedbackRecord(Base):
     corrected_severity = Column(String(32), nullable=True)
     created_by = Column(String(128), default="Analyst")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class DesiredSecurityState(Base):
+    """
+    Closed-Loop Reconciliation & Self-Healing State Engine:
+    Tracks expected security containment configuration on target infrastructure
+    and detects configuration drift (e.g. flushed iptables rules, reconnected endpoints).
+    """
+    __tablename__ = "desired_security_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"), nullable=True)
+    action_type = Column(String(64), nullable=False) # block_ip, isolate_endpoint, isolate_wazuh_agent
+    connector = Column(String(64), nullable=False)   # linux_ssh, windows_firewall, edr, wazuh
+    target = Column(String(255), nullable=False, index=True)
+    expected_status = Column(String(32), default="ACTIVE") # ACTIVE, BLOCKED, ISOLATED
+    parameters = Column(JSON, default=dict)
+
+    is_active = Column(Boolean, default=True)
+    drift_detected = Column(Boolean, default=False)
+    drift_details = Column(Text, nullable=True)
+    auto_heal = Column(Boolean, default=True)
+    healed_count = Column(Integer, default=0)
+    last_reconciled_at = Column(DateTime, nullable=True)
+    last_healed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 

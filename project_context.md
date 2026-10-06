@@ -69,10 +69,11 @@ d:\soar\
 │   ├── app\
 │   │   ├── api\                       # CÁC ĐỊNH TUYẾN RESTful API
 │   │   │   ├── alerts.py              # Webhook Ingestion & Live Attack Prober
-│   │   │   ├── approvals.py           # Human-in-the-Loop Decision Handler
-│   │   │   ├── connectors.py          # Wazuh Manager API & Test Connectors
+│   │   │   ├── approvals.py           # Human-in-the-Loop Decision & Dual-Custody Handler
+│   │   │   ├── connectors.py          # Wazuh Manager API, Identity, EDR Connectors
 │   │   │   ├── incidents.py           # Quản lý & Điều tra Sự cố An ninh
 │   │   │   ├── playbooks.py           # Quản trị Kịch bản Phản hồi
+│   │   │   ├── reconciliation.py      # Closed-Loop Reconciliation & Self-Healing Audit
 │   │   │   ├── settings.py            # Cấu hình Hệ thống & Khóa API bảo mật
 │   │   │   ├── stats.py               # Thống kê KPI & Phân bổ Severity
 │   │   │   └── threat_intel.py        # API Tra cứu CTI (IP-API, VirusTotal)
@@ -81,7 +82,7 @@ d:\soar\
 │   │   │   ├── database.py            # SQLAlchemy Async Engine & Sessionmaker
 │   │   │   └── vault.py               # AES-256-GCM Vault Service & SSH Ed25519 Keypair
 │   │   ├── models\
-│   │   │   └── models.py              # 8 Bảng Cơ sở dữ liệu Thực thể ORM
+│   │   │   └── models.py              # 9 Bảng Cơ sở dữ liệu Thực thể ORM
 │   │   ├── schemas\
 │   │   │   └── schemas.py             # Pydantic Schemas Request & Response
 │   │   ├── seed_data\
@@ -97,12 +98,14 @@ d:\soar\
 │   │   │   ├── mitre_service.py       # Ánh xạ Chiến thuật & Kỹ thuật MITRE
 │   │   │   ├── playbook_engine.py     # Checkpoint State Machine & Graph Execution Engine
 │   │   │   ├── queue_worker.py        # Background Batch Consumer Worker cho Alert Ingestion
+│   │   │   ├── rbac_service.py        # Enterprise RBAC & Dual-Custody 4-Eyes Governance
+│   │   │   ├── reconciliation_service.py # Closed-Loop Reconciler & Self-Healing State Engine
 │   │   │   ├── response_service.py    # Điều phối SSH iptables, Wazuh AR, Identity, EDR
 │   │   │   ├── suppression_service.py # Dynamic Alert Suppression Engine & Wildcard Pattern Filter
 │   │   │   └── ttl_worker.py          # Tiến trình nền Auto-Rollback TTL
 │   │   └── main.py                    # Điểm khởi động FastAPI App, Lifespan & Workers
 │   ├── tests\
-│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (25/25 tests passing 100%)
+│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (27/27 tests passing 100%)
 │   ├── requirements.txt               # Thư viện Python phụ thuộc
 │   └── soar.db                        # Cơ sở dữ liệu SQLite Async (WAL Mode)
 ├── frontend\                          # FRONTEND REACT + VITE + TAILWINDCSS

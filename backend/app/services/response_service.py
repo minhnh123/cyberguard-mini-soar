@@ -20,6 +20,8 @@ def sanitize_ip(ip_str: str) -> Optional[str]:
         return None
 
 class ResponseService:
+    _edr_mock_status: Dict[str, str] = {}
+
     @classmethod
     async def get_connector_settings(cls, db, prefix: str) -> Dict[str, str]:
         config = {}
@@ -192,20 +194,21 @@ class ResponseService:
                 "message": safety_check.get("reason", f"Action on {target} blocked by Safety Guardrails.")
             }
 
+        res = None
         if connector == "windows_firewall":
-            return await cls.block_ip_windows(target, parameters)
+            res = await cls.block_ip_windows(target, parameters)
         elif connector == "linux_ssh":
             if action_type == "test_connection":
                 return await cls.test_linux_ssh(parameters, db)
-            return await cls.block_ip_linux_ssh(target, parameters, db)
+            res = await cls.block_ip_linux_ssh(target, parameters, db)
         elif connector == "cloudflare":
-            return await cls.block_ip_cloudflare(target, parameters, db)
+            res = await cls.block_ip_cloudflare(target, parameters, db)
         elif connector == "identity":
-            return await cls.execute_identity_action(target, action_type, parameters, db)
+            res = await cls.execute_identity_action(target, action_type, parameters, db)
         elif connector in ["edr", "wazuh_ar"]:
-            return await cls.execute_edr_action(target, action_type, parameters, db)
+            res = await cls.execute_edr_action(target, action_type, parameters, db)
         elif connector == "wazuh":
-            return await cls.execute_wazuh_action(target, action_type, parameters, db)
+            res = await cls.execute_wazuh_action(target, action_type, parameters, db)
         elif connector == "webhook":
             return await cls.send_webhook_notification(target, parameters)
         else:
@@ -214,6 +217,26 @@ class ResponseService:
                 "mode": "dry_run",
                 "message": f"Simulated execution for connector '{connector}' targeting '{target}'."
             }
+
+        # Automatically record Desired Security State if action is containment
+        if res and res.get("status") in ["success", "live", "dry_run", "live_success"] and db:
+            if action_lower in ["block_ip", "isolate_endpoint", "isolate_wazuh_agent", "isolate_host"]:
+                try:
+                    from app.services.reconciliation_service import ReconciliationService
+                    await ReconciliationService.record_desired_state(
+                        incident_id=parameters.get("incident_id") if isinstance(parameters, dict) else None,
+                        action_type=action_type,
+                        connector=connector,
+                        target=target,
+                        expected_status="BLOCKED" if "block" in action_lower else "ISOLATED",
+                        parameters=parameters or {},
+                        auto_heal=True,
+                        db=db
+                    )
+                except Exception:
+                    pass
+
+        return res
 
     @classmethod
     async def test_linux_ssh(cls, parameters: Dict[str, Any], db=None) -> Dict[str, Any]:
@@ -1158,6 +1181,7 @@ class ResponseService:
 
         # 3. Enterprise EDR Simulation / Lab Response
         if action_clean in ["isolate_endpoint", "isolate_host", "isolate"]:
+            cls._edr_mock_status[host_target] = "ISOLATED"
             return {
                 "status": "success",
                 "mode": "enterprise_simulation",
@@ -1174,6 +1198,7 @@ class ResponseService:
                 }
             }
         elif action_clean in ["reconnect_endpoint", "restore_host"]:
+            cls._edr_mock_status[host_target] = "CONNECTED"
             return {
                 "status": "success",
                 "mode": "enterprise_simulation",

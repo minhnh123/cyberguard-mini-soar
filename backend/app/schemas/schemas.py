@@ -144,6 +144,16 @@ class PendingApprovalResponse(BaseModel):
     created_at: datetime.datetime
     resolved_at: Optional[datetime.datetime] = None
 
+    # Dual-Custody Fields
+    requires_dual_custody: Optional[bool] = False
+    first_approver: Optional[str] = None
+    first_approver_role: Optional[str] = None
+    first_approved_at: Optional[datetime.datetime] = None
+    second_approver: Optional[str] = None
+    second_approver_role: Optional[str] = None
+    second_approved_at: Optional[datetime.datetime] = None
+    dual_custody_status: Optional[str] = "not_required"
+
     class Config:
         from_attributes = True
 
@@ -151,6 +161,8 @@ class ApprovalDecisionRequest(BaseModel):
     decision: str  # approve, reject
     analyst_note: Optional[str] = None
     ttl_minutes: Optional[int] = 60  # default 60 minutes, None or 0 for permanent
+    approver: Optional[str] = "analyst"
+    approver_role: Optional[str] = "tier2_responder" # tier1_analyst, tier2_responder, tier3_commander, soc_admin
 
 class ApprovalRollbackRequest(BaseModel):
     analyst_note: Optional[str] = "Hoàn tác bởi SOC Analyst"
@@ -211,3 +223,36 @@ class SuppressionRuleResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# Closed-Loop Reconciliation & Self-Healing Schemas
+class DesiredSecurityStateResponse(BaseModel):
+    id: int
+    incident_id: Optional[int] = None
+    action_type: str
+    connector: str
+    target: str
+    expected_status: str
+    parameters: Optional[Dict[str, Any]] = None
+    is_active: bool
+    drift_detected: bool
+    drift_details: Optional[str] = None
+    auto_heal: bool
+    healed_count: int
+    last_reconciled_at: Optional[datetime.datetime] = None
+    last_healed_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+class ReconciliationStatusResponse(BaseModel):
+    total_tracked: int
+    in_sync_count: int
+    drifted_count: int
+    auto_healed_count: int
+    reconciled_at: datetime.datetime
+    details: List[Dict[str, Any]] = []
+
+class SimulateDriftRequest(BaseModel):
+    target: str
+    action: str = "flush_rule"  # flush_rule, reconnect_edr
