@@ -44,6 +44,16 @@ async def lifespan(app: FastAPI):
     from app.services.queue_worker import run_queue_consumer_worker
     queue_task = asyncio.create_task(run_queue_consumer_worker())
 
+    # Khởi tạo và kiểm tra AES-256-GCM Vault & Ed25519 SSH Keypair
+    try:
+        from app.core.vault import VaultService
+        from app.core.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await VaultService.get_or_create_soar_ssh_keypair(db=session)
+            print("[CyberGuard SOAR] AES-256-GCM Vault & Ed25519 SSH Keypair verified.")
+    except Exception as vault_err:
+        print(f"[CyberGuard SOAR Vault Warning] {vault_err}")
+
     print("[CyberGuard SOAR] Ready to receive alerts and orchestrate incident responses.")
     yield
     # Shutdown

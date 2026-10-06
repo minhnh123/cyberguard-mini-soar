@@ -81,6 +81,10 @@ class AIService:
             elif settings_map.get("AI_API_KEY"):
                 api_key = settings_map.get("AI_API_KEY")
 
+            if api_key:
+                from app.core.vault import VaultService
+                api_key = VaultService.decrypt(api_key)
+
         return {
             "provider": provider,
             "api_key": api_key or "",

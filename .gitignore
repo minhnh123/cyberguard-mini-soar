@@ -22,6 +22,9 @@ backend/soar.db
 .env
 .env.local
 backend/.env
+*.key
+*.vault*
+.soar_vault.key
 
 # Node & Frontend dependencies & build artifacts
 node_modules/

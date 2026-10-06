@@ -2,7 +2,7 @@ import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, Float, DateTime, ForeignKey, JSON
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from app.core.database import Base
 
 class Alert(Base):
@@ -161,6 +161,13 @@ class ActionLog(Base):
 
     # Relationships
     incident = relationship("Incident", back_populates="actions")
+
+    @validates("output_message")
+    def validate_output_message(self, key, value):
+        if value:
+            from app.core.vault import VaultService
+            return VaultService.redact_sensitive_strings(str(value))
+        return value
 
 
 class SystemSetting(Base):

@@ -151,7 +151,9 @@ async def verify_webhook_secret(request: Request, db: AsyncSession):
     stmt_key = select(SystemSetting).where(SystemSetting.key == "WEBHOOK_SECRET_KEY")
     res_key = await db.execute(stmt_key)
     row_key = res_key.scalars().first()
-    expected_secret = (row_key.value if row_key and row_key.value else settings.WEBHOOK_SECRET_KEY or "cyberguard-soar-secret").strip()
+    from app.core.vault import VaultService
+    raw_secret = VaultService.decrypt(row_key.value) if (row_key and row_key.value) else ""
+    expected_secret = (raw_secret or settings.WEBHOOK_SECRET_KEY or "cyberguard-soar-secret").strip()
 
     stmt_req = select(SystemSetting).where(SystemSetting.key == "REQUIRE_WEBHOOK_SECRET")
     res_req = await db.execute(stmt_req)

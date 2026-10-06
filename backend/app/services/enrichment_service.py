@@ -95,7 +95,8 @@ class EnrichmentService:
                 res = await db.execute(select(SystemSetting).where(SystemSetting.key == "VIRUSTOTAL_API_KEY"))
                 setting_row = res.scalars().first()
                 if setting_row and setting_row.value:
-                    api_key = setting_row.value
+                    from app.core.vault import VaultService
+                    api_key = VaultService.decrypt(setting_row.value)
             if not api_key:
                 api_key = settings.VIRUSTOTAL_API_KEY
 

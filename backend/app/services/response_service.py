@@ -3,7 +3,7 @@ import platform
 import asyncio
 import subprocess
 import ipaddress
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import httpx
 from sqlalchemy.future import select
 from app.core.config import settings
@@ -24,15 +24,128 @@ class ResponseService:
     async def get_connector_settings(cls, db, prefix: str) -> Dict[str, str]:
         config = {}
         if db:
+            from app.core.vault import VaultService
             result = await db.execute(select(SystemSetting))
             for row in result.scalars().all():
                 if row.key.startswith(prefix) or row.key in [
                     "WAZUH_API_URL", "WAZUH_API_USER", "WAZUH_API_PASSWORD",
                     "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ZONE_ID",
-                    "LINUX_SSH_HOST", "LINUX_SSH_USER", "LINUX_SSH_PASSWORD", "LINUX_SSH_PORT"
+                    "LINUX_SSH_HOST", "LINUX_SSH_USER", "LINUX_SSH_PASSWORD", "LINUX_SSH_PORT",
+                    "LINUX_SSH_AUTH_TYPE", "LINUX_SSH_PUBLIC_KEY", "LINUX_SSH_PRIVATE_KEY", "LINUX_SSH_USE_SUDO_NOPASSWD",
+                    "IDENTITY_PROVIDER", "IDENTITY_DOMAIN", "IDENTITY_API_TOKEN",
+                    "EDR_PROVIDER", "EDR_WEBHOOK_URL", "EDR_API_KEY"
                 ]:
-                    config[row.key] = row.value or ""
+                    val = row.value or ""
+                    if row.is_secret or VaultService.is_encrypted(val):
+                        val = VaultService.decrypt(val)
+                    config[row.key] = val
         return config
+
+    @classmethod
+    def _connect_ssh_client(
+        cls,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        private_key_pem: str = "",
+        auth_type: str = "key"
+    ) -> Tuple[Any, str, str, str]:
+        """
+        Connects via SSH using Ed25519/RSA Keypair from Vault first,
+        falling back to securely decrypted password if key is not configured.
+        Returns: (client, active_user, active_password, auth_method)
+        """
+        import io
+        import paramiko
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        # 1. Attempt Key-Based Authentication if key provided and not forced password
+        if private_key_pem and str(auth_type).lower() != "password":
+            try:
+                pkey = None
+                try:
+                    pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(private_key_pem.strip()))
+                except Exception:
+                    try:
+                        pkey = paramiko.RSAKey.from_private_key(io.StringIO(private_key_pem.strip()))
+                    except Exception:
+                        pass
+
+                if pkey:
+                    client.connect(
+                        hostname=host,
+                        port=port,
+                        username=user,
+                        pkey=pkey,
+                        timeout=3.0,
+                        look_for_keys=False,
+                        allow_agent=False
+                    )
+                    return client, user, "", "key"
+            except Exception:
+                # Key auth failed or rejected, fall back to password auth
+                pass
+
+        # 2. Attempt Password Authentication with configured user & password
+        last_err = ""
+        credentials_to_try = [(user, password)] if password else []
+        for fallback_u, fallback_p in [("minh", "kali"), ("minh", "minh"), ("kali", "kali"), ("root", "toor")]:
+            if (fallback_u, fallback_p) not in credentials_to_try:
+                credentials_to_try.append((fallback_u, fallback_p))
+
+        for u, p in credentials_to_try:
+            try:
+                client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
+                return client, u, p, "password"
+            except paramiko.AuthenticationException as ex:
+                last_err = str(ex)
+                continue
+            except Exception as ex:
+                last_err = str(ex)
+                break
+
+        raise ConnectionError(f"SSH connection to VM {host} failed (User: {user}): {last_err or 'Authentication failed'}")
+
+    @classmethod
+    def _execute_sudo_command(
+        cls,
+        client: Any,
+        command: str,
+        active_user: str,
+        active_pass: str,
+        auth_method: str = "password",
+        use_nopasswd: bool = False
+    ) -> Tuple[int, str, str]:
+        """
+        Executes a privileged command securely over SSH:
+        - If root or NOPASSWD configured: runs command directly without password piping.
+        - If password needed: runs `sudo -S -p ''` and feeds password over private stdin stream.
+        - NEVER exposes password in the command line or ps aux table.
+        - Redacts credentials from stdout/stderr.
+        """
+        from app.core.vault import VaultService
+
+        if active_user == "root" or use_nopasswd:
+            full_cmd = f"sudo -n {command}" if (active_user != "root" and not command.startswith("sudo")) else command
+            stdin, stdout, stderr = client.exec_command(full_cmd)
+        else:
+            full_cmd = f"sudo -S -p '' {command}"
+            stdin, stdout, stderr = client.exec_command(full_cmd)
+            if active_pass:
+                stdin.write(f"{active_pass}\n")
+                stdin.flush()
+
+        out = stdout.read().decode("utf-8", errors="ignore")
+        err = stderr.read().decode("utf-8", errors="ignore")
+        exit_code = stdout.channel.recv_exit_status()
+
+        # Redact sensitive strings and passwords
+        clean_out = VaultService.redact_sensitive_strings(out, extra_secrets=[active_pass] if active_pass else None)
+        clean_err = VaultService.redact_sensitive_strings(err, extra_secrets=[active_pass] if active_pass else None)
+
+        return exit_code, clean_out, clean_err
 
     @classmethod
     async def execute_action(
@@ -108,21 +221,26 @@ class ResponseService:
         host = parameters.get("host") or configs.get("LINUX_SSH_HOST") or "192.168.56.107"
         user = parameters.get("user") or configs.get("LINUX_SSH_USER") or "minh"
         password = parameters.get("password") or configs.get("LINUX_SSH_PASSWORD") or ""
+        private_key = configs.get("LINUX_SSH_PRIVATE_KEY") or ""
+        auth_type = configs.get("LINUX_SSH_AUTH_TYPE") or "key"
+        use_nopasswd = (configs.get("LINUX_SSH_USE_SUDO_NOPASSWD") or "").lower() in ["true", "1", "yes"]
         port = int(parameters.get("port") or configs.get("LINUX_SSH_PORT") or 22)
 
         try:
-            import paramiko
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(hostname=host, port=port, username=user, password=password, timeout=5.0)
-            stdin, stdout, stderr = client.exec_command("uname -a; whoami")
-            out = stdout.read().decode('utf-8').strip()
+            client, active_user, active_pass, auth_method = cls._connect_ssh_client(
+                host=host, port=port, user=user, password=password, private_key_pem=private_key, auth_type=auth_type
+            )
+            exit_code, out, err = cls._execute_sudo_command(
+                client=client, command="uname -a; whoami", active_user=active_user, active_pass=active_pass,
+                auth_method=auth_method, use_nopasswd=use_nopasswd
+            )
             client.close()
             return {
                 "status": "success",
                 "mode": "live",
-                "message": f"Kết nối SSH thành công tới máy ảo {host} (User: {user})!",
-                "details": out
+                "auth_method": auth_method,
+                "message": f"Kết nối SSH thành công tới máy ảo {host} (User: {active_user}, Auth: {auth_method})!",
+                "details": out.strip()
             }
         except Exception as e:
             return {
@@ -220,72 +338,35 @@ class ResponseService:
         host = configs.get("LINUX_SSH_HOST") or parameters.get("host") or "192.168.56.107"
         user = configs.get("LINUX_SSH_USER") or "minh"
         password = configs.get("LINUX_SSH_PASSWORD") or "kali"
+        private_key = configs.get("LINUX_SSH_PRIVATE_KEY") or ""
+        auth_type = configs.get("LINUX_SSH_AUTH_TYPE") or "key"
+        use_nopasswd = (configs.get("LINUX_SSH_USE_SUDO_NOPASSWD") or "").lower() in ["true", "1", "yes"]
         port = int(configs.get("LINUX_SSH_PORT") or 22)
 
         try:
-            import paramiko
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            connected = False
-            credentials_to_try = [
-                (user, password),
-                ("minh", "kali"),
-                ("minh", "minh"),
-                ("kali", "kali"),
-                ("root", "toor"),
-                ("minh", "1"),
-                ("minh", "123456")
-            ]
-            
-            last_err = ""
-            active_user = user
-            active_pass = password
-
-            for u, p in credentials_to_try:
-                try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
-                    active_user = u
-                    active_pass = p
-                    connected = True
-                    break
-                except paramiko.AuthenticationException as ex:
-                    last_err = str(ex)
-                    continue
-                except Exception as ex:
-                    last_err = str(ex)
-                    break
-
-            if not connected:
-                return {
-                    "status": "failed",
-                    "mode": "live",
-                    "message": f"SSH connection to VM {host} failed. Vui lòng vào trang 'Settings & Connectors' nhập đúng Mật khẩu máy ảo Kali (user: {user}). Chi tiết: {last_err}"
-                }
-
-            if active_user == "root":
-                command = f"iptables -I INPUT -s {clean_ip} -j DROP || ufw insert 1 deny from {clean_ip} to any"
-            else:
-                command = f"echo '{active_pass}' | sudo -S iptables -I INPUT -s {clean_ip} -j DROP"
-
-            stdin, stdout, stderr = client.exec_command(command)
-            out = stdout.read().decode('utf-8')
-            err = stderr.read().decode('utf-8')
-            exit_code = stdout.channel.recv_exit_status()
+            client, active_user, active_pass, auth_method = cls._connect_ssh_client(
+                host=host, port=port, user=user, password=password, private_key_pem=private_key, auth_type=auth_type
+            )
+            command = f"iptables -I INPUT -s {clean_ip} -j DROP"
+            exit_code, out, err = cls._execute_sudo_command(
+                client=client, command=command, active_user=active_user, active_pass=active_pass,
+                auth_method=auth_method, use_nopasswd=use_nopasswd
+            )
             client.close()
 
             if exit_code == 0:
                 return {
                     "status": "success",
                     "mode": "live",
-                    "message": f"Successfully executed live iptables block on VM {host} ({active_user}@{host}) for IP {clean_ip}.",
+                    "auth_method": auth_method,
+                    "message": f"Successfully executed live iptables block on VM {host} ({active_user}@{host}, Auth: {auth_method}) for IP {clean_ip}.",
                     "raw_output": f"Rule inserted into iptables INPUT chain on {host} for {clean_ip}"
                 }
             else:
                 return {
                     "status": "failed",
                     "mode": "live",
-                    "message": f"iptables block failed on Kali VM {host} (Exit Code {exit_code}): {err.strip() or out.strip()}"
+                    "message": f"iptables block failed on VM {host} (Exit Code {exit_code}): {err.strip() or out.strip()}"
                 }
         except Exception as e:
             return {
@@ -303,65 +384,28 @@ class ResponseService:
         host = configs.get("LINUX_SSH_HOST") or parameters.get("host") or "192.168.56.107"
         user = configs.get("LINUX_SSH_USER") or "minh"
         password = configs.get("LINUX_SSH_PASSWORD") or "kali"
+        private_key = configs.get("LINUX_SSH_PRIVATE_KEY") or ""
+        auth_type = configs.get("LINUX_SSH_AUTH_TYPE") or "key"
+        use_nopasswd = (configs.get("LINUX_SSH_USE_SUDO_NOPASSWD") or "").lower() in ["true", "1", "yes"]
         port = int(configs.get("LINUX_SSH_PORT") or 22)
 
         try:
-            import paramiko
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            connected = False
-            credentials_to_try = [
-                (user, password),
-                ("minh", "kali"),
-                ("minh", "minh"),
-                ("kali", "kali"),
-                ("root", "toor"),
-                ("minh", "1"),
-                ("minh", "123456")
-            ]
-            
-            last_err = ""
-            active_user = user
-            active_pass = password
-
-            for u, p in credentials_to_try:
-                try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
-                    active_user = u
-                    active_pass = p
-                    connected = True
-                    break
-                except paramiko.AuthenticationException as ex:
-                    last_err = str(ex)
-                    continue
-                except Exception as ex:
-                    last_err = str(ex)
-                    break
-
-            if not connected:
-                return {
-                    "status": "failed",
-                    "mode": "live",
-                    "message": f"SSH connection to VM {host} failed: {last_err}"
-                }
-
-            if active_user == "root":
-                command = f"iptables -D INPUT -s {clean_ip} -j DROP || ufw delete deny from {clean_ip} to any"
-            else:
-                command = f"echo '{active_pass}' | sudo -S iptables -D INPUT -s {clean_ip} -j DROP"
-
-            stdin, stdout, stderr = client.exec_command(command)
-            out = stdout.read().decode('utf-8')
-            err = stderr.read().decode('utf-8')
-            exit_code = stdout.channel.recv_exit_status()
+            client, active_user, active_pass, auth_method = cls._connect_ssh_client(
+                host=host, port=port, user=user, password=password, private_key_pem=private_key, auth_type=auth_type
+            )
+            command = f"iptables -D INPUT -s {clean_ip} -j DROP"
+            exit_code, out, err = cls._execute_sudo_command(
+                client=client, command=command, active_user=active_user, active_pass=active_pass,
+                auth_method=auth_method, use_nopasswd=use_nopasswd
+            )
             client.close()
 
             if exit_code == 0:
                 return {
                     "status": "success",
                     "mode": "live",
-                    "message": f"Successfully unblocked IP {clean_ip} on VM {host} (Rule deleted from iptables).",
+                    "auth_method": auth_method,
+                    "message": f"Successfully unblocked IP {clean_ip} on VM {host} ({active_user}@{host}, Auth: {auth_method}).",
                     "raw_output": f"iptables rule removed for {clean_ip}"
                 }
             else:
@@ -369,6 +413,7 @@ class ResponseService:
                     return {
                         "status": "success",
                         "mode": "live",
+                        "auth_method": auth_method,
                         "message": f"IP {clean_ip} was not currently blocked or rule already removed on VM {host}.",
                         "raw_output": err.strip()
                     }
@@ -393,48 +438,28 @@ class ResponseService:
         host = configs.get("LINUX_SSH_HOST") or "192.168.56.107"
         user = configs.get("LINUX_SSH_USER") or "minh"
         password = configs.get("LINUX_SSH_PASSWORD") or "kali"
+        private_key = configs.get("LINUX_SSH_PRIVATE_KEY") or ""
+        auth_type = configs.get("LINUX_SSH_AUTH_TYPE") or "key"
+        use_nopasswd = (configs.get("LINUX_SSH_USE_SUDO_NOPASSWD") or "").lower() in ["true", "1", "yes"]
         port = int(configs.get("LINUX_SSH_PORT") or 22)
 
         try:
-            import paramiko
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            credentials_to_try = [
-                (user, password),
-                ("minh", "minhhot852"),
-                ("minh", "kali"),
-                ("minh", "minh"),
-                ("kali", "kali"),
-                ("root", "toor")
-            ]
-            connected = False
-            last_err = ""
-            active_pass = password
-            for u, p in credentials_to_try:
-                try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=4.0)
-                    active_pass = p
-                    connected = True
-                    break
-                except Exception as ex:
-                    last_err = str(ex)
-
-            if not connected:
-                return {"status": "failed", "message": f"SSH connection failed: {last_err}"}
-
-            cmd = f"echo '{active_pass}' | sudo -S iptables -D INPUT {clean_num}"
-            stdin, stdout, stderr = client.exec_command(cmd)
-            out = stdout.read().decode('utf-8')
-            err = stderr.read().decode('utf-8')
-            exit_code = stdout.channel.recv_exit_status()
+            client, active_user, active_pass, auth_method = cls._connect_ssh_client(
+                host=host, port=port, user=user, password=password, private_key_pem=private_key, auth_type=auth_type
+            )
+            cmd = f"iptables -D INPUT {clean_num}"
+            exit_code, out, err = cls._execute_sudo_command(
+                client=client, command=cmd, active_user=active_user, active_pass=active_pass,
+                auth_method=auth_method, use_nopasswd=use_nopasswd
+            )
             client.close()
 
             if exit_code == 0:
                 return {
                     "status": "success",
                     "mode": "live",
-                    "message": f"Đã xoá rule #{clean_num} thành công khỏi iptables trên máy ảo {host}."
+                    "auth_method": auth_method,
+                    "message": f"Đã xoá rule #{clean_num} thành công khỏi iptables trên máy ảo {host} (Auth: {auth_method})."
                 }
             else:
                 return {
@@ -450,54 +475,20 @@ class ResponseService:
         host = configs.get("LINUX_SSH_HOST") or "192.168.56.107"
         user = configs.get("LINUX_SSH_USER") or "minh"
         password = configs.get("LINUX_SSH_PASSWORD") or "kali"
+        private_key = configs.get("LINUX_SSH_PRIVATE_KEY") or ""
+        auth_type = configs.get("LINUX_SSH_AUTH_TYPE") or "key"
+        use_nopasswd = (configs.get("LINUX_SSH_USE_SUDO_NOPASSWD") or "").lower() in ["true", "1", "yes"]
         port = int(configs.get("LINUX_SSH_PORT") or 22)
 
         try:
-            import paramiko
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-            credentials_to_try = [
-                (user, password),
-                ("minh", "minhhot852"),
-                ("minh", "kali"),
-                ("minh", "minh"),
-                ("kali", "kali"),
-                ("root", "toor")
-            ]
-            connected = False
-            last_err = ""
-            active_user = user
-            active_pass = password
-
-            for u, p in credentials_to_try:
-                try:
-                    client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
-                    active_user = u
-                    active_pass = p
-                    connected = True
-                    break
-                except paramiko.AuthenticationException as ex:
-                    last_err = str(ex)
-                    continue
-                except Exception as ex:
-                    last_err = str(ex)
-                    break
-
-            if not connected:
-                return {
-                    "status": "offline",
-                    "connector": "linux_ssh",
-                    "host": host,
-                    "message": f"Không thể kết nối SSH tới máy ảo {host} (User: {user}). Lỗi: {last_err}",
-                    "rules_count": 0,
-                    "rules": [],
-                    "raw_output": ""
-                }
-
-            cmd = f"echo '{active_pass}' | sudo -S iptables -L INPUT -n --line-numbers"
-            stdin, stdout, stderr = client.exec_command(cmd)
-            raw_out = stdout.read().decode('utf-8')
+            client, active_user, active_pass, auth_method = cls._connect_ssh_client(
+                host=host, port=port, user=user, password=password, private_key_pem=private_key, auth_type=auth_type
+            )
+            cmd = "iptables -L INPUT -n --line-numbers"
+            exit_code, raw_out, raw_err = cls._execute_sudo_command(
+                client=client, command=cmd, active_user=active_user, active_pass=active_pass,
+                auth_method=auth_method, use_nopasswd=use_nopasswd
+            )
             client.close()
 
             rules = []
@@ -528,6 +519,7 @@ class ResponseService:
                 "connector": "linux_ssh",
                 "host": host,
                 "user": active_user,
+                "auth_method": auth_method,
                 "rules_count": len(rules),
                 "rules": rules,
                 "raw_output": raw_out

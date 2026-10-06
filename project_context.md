@@ -3,13 +3,16 @@
 > **Dự án:** CyberGuard Mini SOAR – Nền tảng Điều phối, Tự động hóa và Phản hồi An ninh mạng tích hợp AI Tier-3 Triage & Wazuh SIEM  
 > **Thư mục làm việc:** `d:\soar`  
 > **Ngày cập nhật:** 2026-10-06  
-> **Trạng thái:** Hoàn thiện Giai đoạn 1 Kiến trúc Enterprise (Backend Test 19/19 Passing, Frontend Build 0 Error). Đã tích hợp trọn vẹn:
+> **Trạng thái:** Hoàn thiện Giai đoạn 1 & Giai đoạn 2 Kiến trúc Enterprise (Backend Test 22/22 Passing, Frontend Build 0 Error). Đã tích hợp trọn vẹn:
 > 1. Safety Guardrails & Auto-Rollback TTL Worker
 > 2. Multi-Domain Connectors (Enterprise Identity Provider & Central Webhook EDR)
 > 3. AI Triage với ReAct / Multi-turn Autonomous Investigation Engine
 > 4. Ingestion Queue Buffer & Backpressure (Chống bão Alert, Non-blocking 202 Accepted, Async Batch Consumer Worker)
 > 5. Durable Playbook Checkpoint State Machine (Per-node checkpointing, `paused_waiting_approval` persistence, Resume upon Approval, Server Boot Auto-Recovery)
 > 6. SQLite WAL Mode Concurrency Tuning (`journal_mode=WAL`, `busy_timeout=10000`, `synchronous=NORMAL`)
+> 7. Local Envelope Encryption Vault (`VaultService` với AES-256-GCM, quản lý Master Key, mã hóa toàn bộ Secret trong DB)
+> 8. SSH Ed25519 Keypair Authentication (Khóa riêng tư mã hóa trong Vault, Public Key quản lý tập trung, ưu tiên Key-Based Auth)
+> 9. Zero-Leak Sudo Execution & Credential Redaction (Loại bỏ `echo pass | sudo -S`, ẩn danh stdin stream, tự động lọc sạch Secret trong ActionLog/Audit)
 
 ---
 
@@ -75,7 +78,8 @@ d:\soar\
 │   │   │   └── threat_intel.py        # API Tra cứu CTI (IP-API, VirusTotal)
 │   │   ├── core\
 │   │   │   ├── config.py              # Cấu hình môi trường & Settings Pydantic
-│   │   │   └── database.py            # SQLAlchemy Async Engine & Sessionmaker
+│   │   │   ├── database.py            # SQLAlchemy Async Engine & Sessionmaker
+│   │   │   └── vault.py               # AES-256-GCM Vault Service & SSH Ed25519 Keypair
 │   │   ├── models\
 │   │   │   └── models.py              # 8 Bảng Cơ sở dữ liệu Thực thể ORM
 │   │   ├── schemas\
@@ -95,7 +99,7 @@ d:\soar\
 │   │   │   └── ttl_worker.py          # Tiến trình nền Auto-Rollback TTL
 │   │   └── main.py                    # Điểm khởi động FastAPI App, Lifespan & Workers
 │   ├── tests\
-│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (19/19 tests passing)
+│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (22/22 tests passing)
 │   ├── requirements.txt               # Thư viện Python phụ thuộc
 │   └── soar.db                        # Cơ sở dữ liệu SQLite Async (WAL Mode)
 ├── frontend\                          # FRONTEND REACT + VITE + TAILWINDCSS

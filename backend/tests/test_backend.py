@@ -425,13 +425,13 @@ async def test_react_investigation_trail():
         assert resp.status_code == 200
         alert_data = resp.json()
         assert alert_data["severity"] in ["high", "critical"]
+        incident_id = alert_data.get("incident_id")
+        assert incident_id is not None
 
-        # 2. Retrieve recent incidents and locate the generated incident
-        inc_resp = await client.get("/api/v1/incidents")
+        # 2. Retrieve the exact incident generated for this alert
+        inc_resp = await client.get(f"/api/v1/incidents/{incident_id}")
         assert inc_resp.status_code == 200
-        incidents = inc_resp.json()
-        assert len(incidents) > 0
-        latest_inc = incidents[0]
+        latest_inc = inc_resp.json()
 
         # 3. Assert ReAct investigation trail presence and structure
         ai_analysis = latest_inc.get("ai_analysis") or {}
@@ -451,13 +451,12 @@ async def test_incident_reinvestigate_endpoint():
     """
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. Get an existing incident
-        inc_resp = await client.get("/api/v1/incidents")
-        assert inc_resp.status_code == 200
-        incidents = inc_resp.json()
-        assert len(incidents) > 0
-        target_inc = incidents[0]
-        inc_id = target_inc["id"]
+        # 1. Trigger an alert to ensure an incident with attached alerts exists
+        resp = await client.post("/api/v1/alerts/simulate?scenario=ssh_bruteforce")
+        assert resp.status_code == 200
+        alert_data = resp.json()
+        inc_id = alert_data.get("incident_id")
+        assert inc_id is not None
 
         # 2. Trigger reanalyze with custom analyst inquiry
         analyst_question = "Kiểm tra sâu hơn về tiến trình cha và trạng thái tài khoản liên quan"
@@ -651,3 +650,140 @@ async def test_server_restart_execution_recovery():
         res = await session.get(PlaybookExecution, stuck_id)
         assert res.status in ["paused_waiting_approval", "completed"]
         assert "Interrupted by system restart" in res.error_message
+
+@pytest.mark.asyncio
+async def test_vault_aes256_gcm_and_redaction():
+    """
+    Test AES-256-GCM envelope encryption, decryption, tampering detection, and credential redaction.
+    """
+    from app.core.vault import VaultService
+
+    raw_secret = "UltraSecretPassword_9999!"
+    encrypted = VaultService.encrypt(raw_secret)
+
+    # 1. Verify encrypted format
+    assert encrypted.startswith("enc:v1:")
+    assert VaultService.is_encrypted(encrypted) is True
+
+    # 2. Verify decryption
+    decrypted = VaultService.decrypt(encrypted)
+    assert decrypted == raw_secret
+
+    # 3. Verify unencrypted string fallback (backward compatibility)
+    legacy_string = "legacy_unencrypted_secret"
+    assert VaultService.decrypt(legacy_string) == legacy_string
+
+    # 4. Verify tampering detection
+    tampered = encrypted[:-4] + "AAAA"
+    bad_res = VaultService.decrypt(tampered)
+    assert "[VAULT_DECRYPTION_ERROR" in bad_res
+
+    # 5. Verify secret masking
+    masked = VaultService.mask_secret(encrypted, visible_suffix=4)
+    assert masked.startswith("••••••••")
+    assert masked.endswith("999!")
+
+    # 6. Verify sensitive string redaction
+    sample_text = (
+        "User tried: echo 'KaliP@ssw0rd!' | sudo -S iptables -I INPUT -s 1.2.3.4 -j DROP "
+        "with header Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.token123 and key: "
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\n-----END OPENSSH PRIVATE KEY-----"
+    )
+    redacted = VaultService.redact_sensitive_strings(sample_text, extra_secrets=["KaliP@ssw0rd!"])
+    assert "[PASSWORD_SUPPRESSED]" in redacted
+    assert "[REDACTED_BEARER_TOKEN]" in redacted
+    assert "[REDACTED_PRIVATE_KEY]" in redacted
+    assert "KaliP@ssw0rd!" not in redacted
+
+@pytest.mark.asyncio
+async def test_vault_ssh_ed25519_keypair_lifecycle():
+    """
+    Test Ed25519 SSH keypair generation, in-vault encrypted persistence, and paramiko loading.
+    """
+    import io
+    import paramiko
+    from app.core.vault import VaultService
+    from app.core.database import AsyncSessionLocal, init_db
+    from app.models.models import SystemSetting
+    from sqlalchemy.future import select
+
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        # Generate or load SOAR keypair
+        keypair_info = await VaultService.get_or_create_soar_ssh_keypair(db=session)
+        assert keypair_info.get("status") in ["ready", "generated"]
+        assert keypair_info.get("public_key", "").startswith("ssh-ed25519 ")
+        assert keypair_info.get("has_private_key") is True
+
+        # Verify in DB: private key MUST be encrypted with AES-256-GCM
+        res = await session.execute(select(SystemSetting).where(SystemSetting.key == "LINUX_SSH_PRIVATE_KEY"))
+        priv_row = res.scalars().first()
+        assert priv_row is not None
+        assert priv_row.value.startswith("enc:v1:")
+        assert priv_row.is_secret is True
+
+        # Verify decryption and Paramiko Ed25519Key compatibility
+        plain_priv_pem = VaultService.decrypt(priv_row.value)
+        assert "-----BEGIN OPENSSH PRIVATE KEY-----" in plain_priv_pem
+        pkey = paramiko.Ed25519Key.from_private_key(io.StringIO(plain_priv_pem))
+        assert pkey.get_name() == "ssh-ed25519"
+        assert pkey.get_bits() == 256
+
+@pytest.mark.asyncio
+async def test_settings_api_vault_encryption_and_actionlog_redaction():
+    """
+    Test that saving secrets via API encrypts in DB, displays masked bullets on GET,
+    and ActionLog automatically sanitizes credentials.
+    """
+    from app.core.database import AsyncSessionLocal, init_db
+    from app.models.models import SystemSetting, ActionLog
+    from sqlalchemy.future import select
+
+    await init_db()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        test_secret = "SecretKey_TestVault_2026_XYZ"
+
+        # 1. Save secret setting via API
+        resp = await ac.post("/api/v1/settings", json=[
+            {
+                "key": "TEST_VAULT_SSH_PASS",
+                "value": test_secret,
+                "category": "connectors",
+                "is_secret": True,
+                "description": "Test Secret Password in Vault"
+            }
+        ])
+        assert resp.status_code == 200
+
+        # 2. Verify in DB directly: Must be stored encrypted!
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(select(SystemSetting).where(SystemSetting.key == "TEST_VAULT_SSH_PASS"))
+            row = res.scalars().first()
+            assert row is not None
+            assert row.value.startswith("enc:v1:")
+            assert test_secret not in row.value  # Plaintext MUST NOT appear in DB
+
+            # 3. Test ActionLog @validates automatic redaction
+            test_log = ActionLog(
+                action_type="block_ip",
+                connector="linux_ssh",
+                target="192.168.1.99",
+                status="success",
+                output_message=f"Connected using echo '{test_secret}' | sudo -S and Bearer abcdef1234567890"
+            )
+            session.add(test_log)
+            await session.commit()
+            await session.refresh(test_log)
+
+            # Verified: Output message redacted
+            assert "[PASSWORD_SUPPRESSED]" in test_log.output_message
+            assert "[REDACTED_BEARER_TOKEN]" in test_log.output_message
+            assert test_secret not in test_log.output_message
+
+        # 4. Check GET /api/v1/settings/ssh-keypair
+        kp_resp = await ac.get("/api/v1/settings/ssh-keypair")
+        assert kp_resp.status_code == 200
+        kp_data = kp_resp.json()
+        assert kp_data["status"] == "success"
+        assert kp_data["public_key"].startswith("ssh-ed25519 ")
+
