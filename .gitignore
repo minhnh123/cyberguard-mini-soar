@@ -12,6 +12,8 @@ ENV/
 
 # Database files & Local State
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 backend/soar.db

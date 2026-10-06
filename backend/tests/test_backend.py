@@ -475,3 +475,179 @@ async def test_incident_reinvestigate_endpoint():
         # Verify that analyst inquiry is present in the trail
         has_analyst_round = any(step.get("action") == "analyst_inquiry" for step in trail)
         assert has_analyst_round, "Expected an 'analyst_inquiry' action in the investigation trail"
+
+@pytest.mark.asyncio
+async def test_ingestion_queue_buffer_high_throughput():
+    """
+    Test High-Throughput Async Ingestion Queue Buffer under burst webhook traffic.
+    Verifies that webhook responds immediately with 202 Accepted and queues alerts safely.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Check initial queue health
+        status_resp = await client.get("/api/v1/alerts/queue-status")
+        assert status_resp.status_code == 200
+        initial_status = status_resp.json()
+        assert "queue_depth" in initial_status
+        assert initial_status["is_healthy"] is True
+
+        # 2. Burst enqueue 10 alerts
+        for i in range(10):
+            payload = {
+                "title": f"Burst Test Alert #{i}",
+                "source": "Wazuh",
+                "severity": "medium",
+                "source_ip": f"198.51.100.{10 + i}",
+                "description": f"Simulated high-throughput burst alert item #{i}"
+            }
+            resp = await client.post("/api/v1/alerts/buffered-webhook", json=payload)
+            assert resp.status_code == 202
+            data = resp.json()
+            assert data["status"] == "queued"
+            assert "task_id" in data
+            assert data["task_id"].startswith("QTSK-")
+
+        # 3. Verify queue depth increased or was processed
+        status_after = await client.get("/api/v1/alerts/queue-status")
+        assert status_after.status_code == 200
+        stats = status_after.json()["stats"]
+        assert stats["ingested_count"] >= 10
+
+@pytest.mark.asyncio
+async def test_durable_playbook_checkpointing_and_resume():
+    """
+    Test durable execution state machine: validates per-node checkpointing,
+    paused_waiting_approval state persistence, and successful workflow resumption.
+    """
+    from app.core.database import AsyncSessionLocal, init_db
+    from app.models.models import Playbook, PlaybookExecution, Incident, Alert
+    from app.services.playbook_engine import PlaybookEngine
+
+    await init_db()
+    import uuid
+    async with AsyncSessionLocal() as session:
+        # Create a test incident and alert
+        uid = uuid.uuid4().hex[:6].upper()
+        inc = Incident(
+            incident_number=f"INC-TEST-DURABLE-{uid}",
+            title="Durable Execution Test Incident",
+            severity="high",
+            status="investigating"
+        )
+        session.add(inc)
+        await session.commit()
+        await session.refresh(inc)
+
+        alt = Alert(
+            alert_id=f"ALT-DURABLE-{uid}",
+            incident_id=inc.id,
+            title="Durable Workflow Trigger Alert",
+            severity="high",
+            source="EDR",
+            source_ip="203.0.113.88",
+            description="Testing checkpoint persistence"
+        )
+        session.add(alt)
+        await session.commit()
+        await session.refresh(alt)
+
+        # Create a playbook with 3 nodes: Enrich -> Approval -> Response Action
+        test_pb = Playbook(
+            name=f"Durable Checkpointing Test Playbook {uid}",
+            category="generic",
+            is_active=True,
+            graph_data={
+                "nodes": [
+                    {"id": "node_1", "type": "enrichment", "data": {"label": "Enrich Threat Intel"}},
+                    {"id": "node_2", "type": "human_approval", "data": {"label": "Human Approval Gate"}},
+                    {"id": "node_3", "type": "response_action", "data": {"label": "Contain Host", "actionType": "block_ip"}}
+                ]
+            }
+        )
+        session.add(test_pb)
+        await session.commit()
+        await session.refresh(test_pb)
+
+        # Initialize execution
+        execution = PlaybookExecution(
+            playbook_id=test_pb.id,
+            incident_id=inc.id,
+            status="running",
+            current_step="start",
+            current_step_index=0,
+            context_state={},
+            checkpoint_history=[]
+        )
+        session.add(execution)
+        await session.commit()
+        await session.refresh(execution)
+        exec_id = execution.id
+
+        # Run playbook up to approval node
+        await PlaybookEngine.execute_playbook(test_pb, execution, inc, alt, session, start_index=0)
+
+        # Assert that execution is paused at checkpoint
+        await session.refresh(execution)
+        assert execution.status == "paused_waiting_approval"
+        assert execution.current_step_index == 2  # Set to index of next node (node_3)
+        assert len(execution.checkpoint_history) >= 2
+        assert "enrichment" in execution.context_state
+
+        # Now simulate analyst decision and resume execution
+        resumed_exec = await PlaybookEngine.resume_execution(
+            execution_id=exec_id,
+            approval_decision={"decision": "approve", "analyst": "lead_soc_analyst"},
+            db=session
+        )
+        assert resumed_exec is not None
+        assert resumed_exec.status == "completed"
+        assert resumed_exec.context_state.get("approval_decision", {}).get("decision") == "approve"
+
+@pytest.mark.asyncio
+async def test_server_restart_execution_recovery():
+    """
+    Test recovery of interrupted executions when the SOAR server restarts unexpectedly.
+    """
+    from app.core.database import AsyncSessionLocal, init_db
+    from app.models.models import Playbook, PlaybookExecution, Incident
+    from app.services.playbook_engine import PlaybookEngine
+    import uuid
+
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        uid = uuid.uuid4().hex[:6].upper()
+        # Create an execution left in 'running' state (interrupted by server crash)
+        inc = Incident(
+            incident_number=f"INC-TEST-RECOVERY-{uid}",
+            title="Recovery Incident",
+            severity="medium",
+            status="investigating"
+        )
+        session.add(inc)
+
+        pb = Playbook(name=f"Recovery Test Playbook {uid}", category="generic", is_active=True)
+        session.add(pb)
+        await session.commit()
+        await session.refresh(inc)
+        await session.refresh(pb)
+
+        stuck_exec = PlaybookExecution(
+            playbook_id=pb.id,
+            incident_id=inc.id,
+            status="running",
+            current_step="executing",
+            current_step_index=1,
+            context_state={"step_1": "done"}
+        )
+        session.add(stuck_exec)
+        await session.commit()
+        stuck_id = stuck_exec.id
+
+        # Run recovery process
+        recovered_count = await PlaybookEngine.recover_interrupted_executions(session)
+        assert recovered_count >= 1
+
+        # Verify execution was safely recovered
+        res = await session.get(PlaybookExecution, stuck_id)
+        assert res.status in ["paused_waiting_approval", "completed"]
+        assert "Interrupted by system restart" in res.error_message

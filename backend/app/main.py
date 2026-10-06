@@ -25,15 +25,34 @@ async def lifespan(app: FastAPI):
     print("[CyberGuard SOAR] Initializing Database & Seed Data...")
     await init_db()
     await seed_database()
+
+    # Phục hồi các checkpoint Playbook Execution nếu server từng bị tắt đột ngột
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.services.playbook_engine import PlaybookEngine
+        async with AsyncSessionLocal() as session:
+            rec_count = await PlaybookEngine.recover_interrupted_executions(session)
+            if rec_count > 0:
+                print(f"[CyberGuard SOAR] Đã phục hồi {rec_count} checkpoint Playbook Execution bị gián đoạn.")
+    except Exception as rec_err:
+        print(f"[CyberGuard SOAR Recovery Warning] {rec_err}")
+
+    # Khởi động TTL Auto-Rollback Worker
     ttl_task = asyncio.create_task(start_ttl_worker(interval_seconds=15))
+
+    # Khởi động Ingestion Queue Consumer Worker chống bão Alert
+    from app.services.queue_worker import run_queue_consumer_worker
+    queue_task = asyncio.create_task(run_queue_consumer_worker())
+
     print("[CyberGuard SOAR] Ready to receive alerts and orchestrate incident responses.")
     yield
     # Shutdown
     print("[CyberGuard SOAR] Shutting down.")
     ttl_task.cancel()
+    queue_task.cancel()
     try:
-        await ttl_task
-    except (asyncio.CancelledError, Exception):
+        await asyncio.gather(ttl_task, queue_task, return_exceptions=True)
+    except Exception:
         pass
 
 app = FastAPI(

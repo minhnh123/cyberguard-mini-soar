@@ -337,10 +337,36 @@ async def process_alert_ingestion(raw_payload: Dict[str, Any], db: AsyncSession)
 
     return new_alert
 
-@router.post("/webhook", response_model=AlertResponse)
+@router.post("/buffered-webhook", status_code=202)
+async def ingest_buffered_webhook_alert(
+    raw_payload: Dict[str, Any],
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Enterprise High-Throughput Webhook Ingestion.
+    Xác thực chữ ký và đẩy ngay vào IngestionQueueBuffer trong < 5ms,
+    chống nghẽn SQLite và ngăn chặn rớt gói khi bão cảnh báo (Event Storms).
+    """
+    await verify_webhook_secret(request, db)
+    from app.services.ingestion_queue import ingestion_queue
+    client_ip = request.client.host if request.client else "unknown"
+    result = await ingestion_queue.enqueue(raw_payload, client_ip=client_ip)
+    return result
+
+@router.get("/queue-status")
+async def get_ingestion_queue_status():
+    """
+    Kiểm tra tình trạng sức khỏe, độ sâu hàng đợi và năng lực xử lý của IngestionQueueBuffer.
+    """
+    from app.services.ingestion_queue import ingestion_queue
+    return ingestion_queue.get_metrics()
+
+@router.post("/webhook")
 async def ingest_webhook_alert(
     raw_payload: Dict[str, Any],
     request: Request,
+    buffer: bool = Query(False, description="Đẩy vào hàng đợi đệm Ingestion Queue Buffer"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -349,6 +375,11 @@ async def ingest_webhook_alert(
     Hỗ trợ xác thực X-Webhook-Secret và phát sóng sự kiện thời gian thực qua WebSocket.
     """
     await verify_webhook_secret(request, db)
+    if buffer:
+        from app.services.ingestion_queue import ingestion_queue
+        client_ip = request.client.host if request.client else "unknown"
+        return await ingestion_queue.enqueue(raw_payload, client_ip=client_ip)
+
     return await process_alert_ingestion(raw_payload, db)
 
 @router.get("", response_model=List[AlertResponse])

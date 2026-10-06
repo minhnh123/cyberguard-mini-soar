@@ -92,8 +92,14 @@ class PlaybookExecution(Base):
     id = Column(Integer, primary_key=True, index=True)
     playbook_id = Column(Integer, ForeignKey("playbooks.id", ondelete="CASCADE"))
     incident_id = Column(Integer, ForeignKey("incidents.id", ondelete="CASCADE"))
-    status = Column(String(32), default="running")    # running, completed, failed, waiting_approval
+    status = Column(String(32), default="running")    # running, completed, failed, waiting_approval, paused_waiting_approval, resumed
     current_step = Column(String(128), nullable=True)
+    current_step_index = Column(Integer, default=0)
+    current_node_id = Column(String(64), nullable=True)
+    context_state = Column(JSON, default=dict)
+    checkpoint_history = Column(JSON, default=list)
+    is_resumable = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
     logs = Column(JSON, default=list)                 # [{"node_id": "1", "status": "success", "output": {...}}]
     
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

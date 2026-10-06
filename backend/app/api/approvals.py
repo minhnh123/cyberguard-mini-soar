@@ -122,21 +122,23 @@ async def handle_approval_decision(
         if incident and incident.status in ["open", "investigating"]:
             incident.status = "contained"
 
-        # If there was an associated playbook execution waiting on this approval, resume it
+        # Durable Workflow Checkpointing: Resume playbook execution with analyst decision
         if approval.playbook_execution_id:
-            pb_exec_res = await db.execute(select(PlaybookExecution).where(PlaybookExecution.id == approval.playbook_execution_id))
-            pb_exec = pb_exec_res.scalars().first()
-            if pb_exec and pb_exec.status == "waiting_approval":
-                pb_exec.status = "completed"
-                pb_exec.finished_at = datetime.datetime.utcnow()
-                logs = list(pb_exec.logs or [])
-                logs.append({
-                    "time": datetime.datetime.utcnow().isoformat(),
-                    "step": "human_approval",
-                    "status": "approved",
-                    "output": exec_res
-                })
-                pb_exec.logs = logs
+            try:
+                from app.services.playbook_engine import PlaybookEngine
+                await PlaybookEngine.resume_execution(
+                    execution_id=approval.playbook_execution_id,
+                    approval_decision={
+                        "decision": "approve",
+                        "status": exec_status,
+                        "output": exec_res,
+                        "analyst_note": approval.analyst_note,
+                        "target": approval.target
+                    },
+                    db=db
+                )
+            except Exception as pb_ex:
+                print(f"[Approval Warning] Could not resume playbook execution: {pb_ex}")
 
         await db.commit()
 

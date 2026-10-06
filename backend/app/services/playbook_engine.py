@@ -2,6 +2,8 @@ import json
 import datetime
 from typing import Dict, Any, List, Optional
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 from app.models.models import (
     Playbook, PlaybookExecution, Incident, Alert, PendingApproval, ActionLog
 )
@@ -26,14 +28,23 @@ class PlaybookEngine:
                     incident_id=incident.id,
                     status="running",
                     current_step="start",
-                    logs=[{"time": datetime.datetime.utcnow().isoformat(), "step": "start", "message": f"Playbook '{pb.name}' triggered for Incident {incident.incident_number}"}]
+                    current_step_index=0,
+                    current_node_id=None,
+                    context_state={},
+                    checkpoint_history=[],
+                    is_resumable=True,
+                    logs=[{
+                        "time": datetime.datetime.utcnow().isoformat(),
+                        "step": "start",
+                        "message": f"Playbook '{pb.name}' triggered for Incident {incident.incident_number}"
+                    }]
                 )
                 db.add(execution)
                 await db.commit()
                 await db.refresh(execution)
 
-                # Run the execution asynchronously
-                await cls.execute_playbook(pb, execution, incident, alert, db)
+                # Run the execution asynchronously with checkpointing
+                await cls.execute_playbook(pb, execution, incident, alert, db, start_index=0)
                 triggered_executions.append(execution)
 
         return triggered_executions
@@ -44,14 +55,12 @@ class PlaybookEngine:
         if not conds:
             return True
 
-        # Check severity match (Allow medium, high, critical by default)
+        # Check severity match
         if "severity" in conds:
             allowed_sevs = [s.lower() for s in conds["severity"]]
-            # If alert or incident is medium/high/critical, allow trigger
             alert_sev = alert.severity.lower()
             inc_sev = incident.severity.lower()
             if alert_sev not in allowed_sevs and inc_sev not in allowed_sevs:
-                # Also allow if alert is medium/high/critical and playbook covers security attacks
                 if alert_sev in ["medium", "high", "critical"] and any(s in allowed_sevs for s in ["high", "critical"]):
                     pass
                 else:
@@ -82,18 +91,24 @@ class PlaybookEngine:
         execution: PlaybookExecution,
         incident: Incident,
         alert: Alert,
-        db
+        db,
+        start_index: int = 0,
+        initial_context: Optional[Dict[str, Any]] = None
     ):
         """
-        Execute visual graph nodes sequentially or according to graph edges.
+        Durable workflow execution with per-node checkpointing.
+        Saves context state and execution progression into the database after every step.
         """
         graph = playbook.graph_data or {}
         nodes = graph.get("nodes", [])
-        edges = graph.get("edges", [])
 
         logs = list(execution.logs or [])
-        context_data = {
-            "alert": {
+        checkpoint_history = list(execution.checkpoint_history or [])
+
+        # Recover context from initial_context or execution.context_state or bootstrap new
+        context_data = initial_context or dict(execution.context_state or {})
+        if not context_data.get("alert"):
+            context_data["alert"] = {
                 "id": alert.id,
                 "title": alert.title,
                 "source": alert.source,
@@ -104,12 +119,13 @@ class PlaybookEngine:
                 "agent_id": alert.agent_id,
                 "hostname": alert.hostname,
                 "raw_payload": alert.raw_payload
-            },
-            "enrichment": {},
-            "ai_triage": {}
-        }
+            }
+        if "enrichment" not in context_data:
+            context_data["enrichment"] = {}
+        if "ai_triage" not in context_data:
+            context_data["ai_triage"] = {}
 
-        # If no explicit graph nodes, run standard default workflow: Enrich -> AI Triage -> Approval -> Response
+        # Default fallback linear graph if empty
         if not nodes:
             nodes = [
                 {"id": "node_enrich", "type": "enrichment", "data": {"label": "Enrich Threat Intel"}},
@@ -117,16 +133,21 @@ class PlaybookEngine:
                 {"id": "node_approval", "type": "human_approval", "data": {"label": "Human-in-the-loop Approval Gateway"}},
             ]
 
-        for node in nodes:
+        for idx in range(start_index, len(nodes)):
+            node = nodes[idx]
             node_id = node.get("id")
             node_type = node.get("type") or node.get("data", {}).get("nodeType", "action")
             node_data = node.get("data", {})
             step_name = node_data.get("label", node_type)
 
             execution.current_step = step_name
+            execution.current_step_index = idx
+            execution.current_node_id = node_id
+
             logs.append({
                 "time": datetime.datetime.utcnow().isoformat(),
                 "node_id": node_id,
+                "step_index": idx,
                 "step": step_name,
                 "type": node_type,
                 "status": "executing"
@@ -135,7 +156,7 @@ class PlaybookEngine:
             try:
                 # 1. Enrichment Node
                 if node_type in ["enrichment", "threat_intel"]:
-                    enrich_results = {}
+                    enrich_results = dict(context_data.get("enrichment", {}))
                     if alert.source_ip:
                         geo_info = await EnrichmentService.lookup_ip_geo(alert.source_ip, db=db)
                         enrich_results["ip_geo"] = geo_info
@@ -144,7 +165,7 @@ class PlaybookEngine:
                     if alert.file_hash:
                         vt_hash = await EnrichmentService.lookup_virustotal("hash", alert.file_hash, db=db)
                         enrich_results["virustotal_file"] = vt_hash
-                    
+
                     context_data["enrichment"] = enrich_results
                     logs.append({
                         "time": datetime.datetime.utcnow().isoformat(),
@@ -180,13 +201,12 @@ class PlaybookEngine:
                         }
                     })
 
-                # 3. Human-in-the-Loop Approval Node
+                # 3. Human-in-the-Loop Approval Node (Durable Pause Point)
                 elif node_type in ["human_approval", "approval"]:
                     recommended = context_data.get("ai_triage", {}).get("recommended_actions", [])
                     created_approvals = []
 
                     if not recommended and alert.source_ip:
-                        # Fallback default action proposal
                         recommended = [{
                             "action_type": "block_ip",
                             "connector": "windows_firewall",
@@ -204,7 +224,6 @@ class PlaybookEngine:
                         reason = rec.get("reason", "Automated Playbook Proposal")
                         risk_level = rec.get("risk_level", "medium")
 
-                        # Check Guardrails warning
                         guardrail_check = await GuardrailService.validate_action_safety(target, action_type, connector, db=db)
                         if not guardrail_check.get("allowed", True):
                             reason = f"[GUARDRAIL WARNING: Protected Critical IP] {reason} - {guardrail_check.get('reason')}"
@@ -225,15 +244,34 @@ class PlaybookEngine:
                         db.add(approval)
                         created_approvals.append(approval)
 
-                    execution.status = "waiting_approval"
+                    # Durable State Checkpointing before pause
+                    execution.status = "paused_waiting_approval"
+                    execution.current_step_index = idx + 1  # Resume next step after approval
+                    execution.context_state = context_data
+
+                    checkpoint_history.append({
+                        "node_id": node_id,
+                        "step": step_name,
+                        "time": datetime.datetime.utcnow().isoformat(),
+                        "status": "paused_waiting_approval"
+                    })
+                    execution.checkpoint_history = list(checkpoint_history)
+                    execution.context_state = context_data
+
                     logs.append({
                         "time": datetime.datetime.utcnow().isoformat(),
                         "node_id": node_id,
                         "step": step_name,
-                        "status": "waiting_approval",
-                        "message": f"Generated {len(created_approvals)} pending response action(s) for analyst review."
+                        "status": "paused_waiting_approval",
+                        "message": f"Durable checkpoint saved. Generated {len(created_approvals)} pending response action(s) for analyst review."
                     })
+
+                    execution.logs = list(logs)
+                    flag_modified(execution, "checkpoint_history")
+                    flag_modified(execution, "context_state")
+                    flag_modified(execution, "logs")
                     await db.commit()
+
                     for app_item in created_approvals:
                         try:
                             from app.services.websocket_manager import ws_manager
@@ -249,9 +287,10 @@ class PlaybookEngine:
                             })
                         except Exception:
                             pass
-                    break  # Pause playbook until analyst approves
 
-                # 4. Direct Response Action Node (if configured for autonomous execution)
+                    return  # Workflow paused safely in durable state
+
+                # 4. Direct Response Action Node
                 elif node_type in ["response_action", "action"]:
                     action_type = node_data.get("actionType") or "block_ip"
                     connector = node_data.get("connector") or "windows_firewall"
@@ -284,6 +323,20 @@ class PlaybookEngine:
                         "output": exec_res
                     })
 
+                # Checkpoint after successful step
+                checkpoint_history.append({
+                    "node_id": node_id,
+                    "step": step_name,
+                    "time": datetime.datetime.utcnow().isoformat(),
+                    "status": "success"
+                })
+                execution.checkpoint_history = list(checkpoint_history)
+                execution.context_state = context_data
+                flag_modified(execution, "checkpoint_history")
+                flag_modified(execution, "context_state")
+                flag_modified(execution, "logs")
+                await db.commit()
+
             except Exception as e:
                 logs.append({
                     "time": datetime.datetime.utcnow().isoformat(),
@@ -293,11 +346,103 @@ class PlaybookEngine:
                     "error": str(e)
                 })
                 execution.status = "failed"
-                break
+                execution.error_message = str(e)
+                execution.logs = logs
+                await db.commit()
+                return
 
-        if execution.status != "waiting_approval":
+        # Completed all steps
+        if execution.status != "paused_waiting_approval":
             execution.status = "completed"
             execution.finished_at = datetime.datetime.utcnow()
 
         execution.logs = logs
         await db.commit()
+
+    @classmethod
+    async def resume_execution(
+        cls,
+        execution_id: int,
+        approval_decision: Dict[str, Any],
+        db
+    ) -> Optional[PlaybookExecution]:
+        """
+        Resumes a paused execution from its persisted checkpoint after analyst approval/decision.
+        """
+        query = select(PlaybookExecution).where(PlaybookExecution.id == execution_id)
+        result = await db.execute(query)
+        execution = result.scalars().first()
+        if not execution:
+            return None
+
+        # Fetch Playbook, Incident, Alert
+        pb_res = await db.execute(select(Playbook).where(Playbook.id == execution.playbook_id))
+        playbook = pb_res.scalars().first()
+
+        inc_res = await db.execute(
+            select(Incident).options(selectinload(Incident.alerts)).where(Incident.id == execution.incident_id)
+        )
+        incident = inc_res.scalars().first()
+        if not playbook or not incident:
+            return None
+
+        alert = incident.alerts[0] if incident.alerts else None
+        if not alert:
+            return None
+
+        # Load persisted context and inject approval decision
+        context_data = dict(execution.context_state or {})
+        context_data["approval_decision"] = approval_decision
+
+        logs = list(execution.logs or [])
+        logs.append({
+            "time": datetime.datetime.utcnow().isoformat(),
+            "step": "workflow_resumed",
+            "status": "resumed",
+            "message": f"Analyst decision '{approval_decision.get('decision')}' received. Resuming workflow from step index {execution.current_step_index}."
+        })
+        execution.logs = logs
+        execution.status = "resumed"
+        await db.commit()
+
+        start_index = execution.current_step_index or 0
+        await cls.execute_playbook(
+            playbook=playbook,
+            execution=execution,
+            incident=incident,
+            alert=alert,
+            db=db,
+            start_index=start_index,
+            initial_context=context_data
+        )
+
+        return execution
+
+    @classmethod
+    async def recover_interrupted_executions(cls, db) -> int:
+        """
+        Scans for executions left in 'running' or 'resumed' status due to unexpected server restart.
+        Ensures resilience and state consistency on boot.
+        """
+        query = select(PlaybookExecution).where(PlaybookExecution.status.in_(["running", "resumed"]))
+        res = await db.execute(query)
+        stuck = res.scalars().all()
+        count = 0
+
+        for ex in stuck:
+            logs = list(ex.logs or [])
+            logs.append({
+                "time": datetime.datetime.utcnow().isoformat(),
+                "step": "server_boot_recovery",
+                "status": "recovered",
+                "message": "System restart detected. Preserved durable checkpoint."
+            })
+            ex.logs = logs
+            ex.status = "paused_waiting_approval" if ex.current_step_index > 0 else "failed"
+            ex.error_message = "Interrupted by system restart; checkpoint preserved."
+            count += 1
+
+        if count > 0:
+            await db.commit()
+
+        return count

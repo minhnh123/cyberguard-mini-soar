@@ -2,8 +2,14 @@
 
 > **Dự án:** CyberGuard Mini SOAR – Nền tảng Điều phối, Tự động hóa và Phản hồi An ninh mạng tích hợp AI Tier-3 Triage & Wazuh SIEM  
 > **Thư mục làm việc:** `d:\soar`  
-> **Ngày cập nhật:** 2026-09-10  
-> **Trạng thái:** Hoàn thiện 100% (Backend Test 16/16 Passing, Frontend Build 0 Error - Đã tích hợp trọn vẹn Bước 1: Safety Guardrails & Auto-Rollback TTL Worker, Bước 2: Bổ sung 2 Connector tối quan trọng: Enterprise Identity Provider & Central Webhook EDR, và Bước 3: Nâng cấp AI Triage với ReAct / Multi-turn Autonomous Investigation Engine)
+> **Ngày cập nhật:** 2026-10-06  
+> **Trạng thái:** Hoàn thiện Giai đoạn 1 Kiến trúc Enterprise (Backend Test 19/19 Passing, Frontend Build 0 Error). Đã tích hợp trọn vẹn:
+> 1. Safety Guardrails & Auto-Rollback TTL Worker
+> 2. Multi-Domain Connectors (Enterprise Identity Provider & Central Webhook EDR)
+> 3. AI Triage với ReAct / Multi-turn Autonomous Investigation Engine
+> 4. Ingestion Queue Buffer & Backpressure (Chống bão Alert, Non-blocking 202 Accepted, Async Batch Consumer Worker)
+> 5. Durable Playbook Checkpoint State Machine (Per-node checkpointing, `paused_waiting_approval` persistence, Resume upon Approval, Server Boot Auto-Recovery)
+> 6. SQLite WAL Mode Concurrency Tuning (`journal_mode=WAL`, `busy_timeout=10000`, `synchronous=NORMAL`)
 
 ---
 
@@ -80,16 +86,18 @@ d:\soar\
 │   │   │   ├── ai_service.py          # ReAct Autonomous Investigation & LLM Triage
 │   │   │   ├── enrichment_service.py  # Làm giàu CTI (IP-API, VirusTotal v3 Cache)
 │   │   │   ├── guardrail_service.py   # Safety Guardrails & Blast Radius Mitigation
+│   │   │   ├── ingestion_queue.py     # High-throughput Buffer & Backpressure Queue
 │   │   │   ├── investigation_tools.py # 5 Công cụ Điều tra Hệ thống Thực tế cho AI
 │   │   │   ├── mitre_service.py       # Ánh xạ Chiến thuật & Kỹ thuật MITRE
-│   │   │   ├── playbook_engine.py     # Động cơ duyệt đồ thị kịch bản phản hồi
+│   │   │   ├── playbook_engine.py     # Checkpoint State Machine & Graph Execution Engine
+│   │   │   ├── queue_worker.py        # Background Batch Consumer Worker cho Alert Ingestion
 │   │   │   ├── response_service.py    # Điều phối SSH iptables, Wazuh AR, Identity, EDR
 │   │   │   └── ttl_worker.py          # Tiến trình nền Auto-Rollback TTL
-│   │   └── main.py                    # Điểm khởi động FastAPI App & CORS
+│   │   └── main.py                    # Điểm khởi động FastAPI App, Lifespan & Workers
 │   ├── tests\
-│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (16/16 tests passing)
+│   │   └── test_backend.py            # Bộ kiểm thử tự động Pytest (19/19 tests passing)
 │   ├── requirements.txt               # Thư viện Python phụ thuộc
-│   └── soar.db                        # Cơ sở dữ liệu SQLite Async
+│   └── soar.db                        # Cơ sở dữ liệu SQLite Async (WAL Mode)
 ├── frontend\                          # FRONTEND REACT + VITE + TAILWINDCSS
 │   ├── src\
 │   │   ├── components\
