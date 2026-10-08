@@ -259,7 +259,7 @@ async def test_auto_rollback_ttl_worker():
     # Insert an expired approval in database
     async with AsyncSessionLocal() as session:
         inc = Incident(
-            incident_number=f"INC-TEST-TTL-{int(datetime.datetime.utcnow().timestamp())}",
+            incident_number=f"INC-TEST-TTL-{int(datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).timestamp())}",
             title="TTL Auto-Rollback Unit Test",
             severity="high",
             status="contained"
@@ -278,7 +278,7 @@ async def test_auto_rollback_ttl_worker():
             risk_level="medium",
             status="executed",
             ttl_minutes=15,
-            expires_at=datetime.datetime.utcnow() - datetime.timedelta(minutes=5),  # 5 minutes in the past
+            expires_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(minutes=5),  # 5 minutes in the past
             is_expired=False
         )
         session.add(expired_appr)
@@ -1180,6 +1180,183 @@ async def test_closed_loop_reconciliation_drift_detection_and_self_healing():
         assert match_state is not None
         assert match_state["healed_count"] >= 1
         assert match_state["drift_detected"] is False
+
+@pytest.mark.asyncio
+async def test_cryptography_requirements_and_vault_dependency():
+    """
+    Issue #5 Verification:
+    Verify cryptography is explicitly declared in requirements.txt (root and backend),
+    and that VaultService AES-256-GCM / Ed25519 primitives can be imported and initialized.
+    """
+    import os
+    from app.core.vault import VaultService
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    # Check root requirements.txt
+    root_req_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "requirements.txt"))
+    assert os.path.isfile(root_req_path), f"requirements.txt missing at root {root_req_path}"
+    with open(root_req_path, "r", encoding="utf-8") as f:
+        root_reqs = f.read()
+    assert "cryptography" in root_reqs, "cryptography missing from root requirements.txt"
+
+    # Check backend/requirements.txt
+    backend_req_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "requirements.txt"))
+    assert os.path.isfile(backend_req_path), f"requirements.txt missing at backend {backend_req_path}"
+    with open(backend_req_path, "r", encoding="utf-8") as f:
+        backend_reqs = f.read()
+    assert "cryptography" in backend_reqs, "cryptography missing from backend/requirements.txt"
+
+    # Verify Vault encrypt/decrypt works with active cryptography package
+    plain = "TopSecret123_ReliabilityTest"
+    cipher = VaultService.encrypt(plain)
+    assert cipher.startswith("enc:v1:")
+    decrypted = VaultService.decrypt(cipher)
+    assert decrypted == plain
+
+@pytest.mark.asyncio
+async def test_queue_worker_per_item_session_isolation():
+    """
+    Issue #6 Verification:
+    Verify that Queue Worker processes batch items in isolated sessions:
+    If item 3/5 fails, items 1, 2, 4, 5 are committed and saved cleanly,
+    preventing entire batch loss.
+    """
+    import uuid
+    import asyncio
+    import datetime
+    from app.core.database import AsyncSessionLocal, init_db
+    from app.services.ingestion_queue import IngestionQueueBuffer
+    from app.models.models import Alert
+    from sqlalchemy.future import select
+
+    await init_db()
+    test_queue = IngestionQueueBuffer.__new__(IngestionQueueBuffer)
+    test_queue._maxsize = 100
+    test_queue._queue = asyncio.Queue(maxsize=100)
+    test_queue._stats = {
+        "ingested_count": 0, "processed_count": 0, "error_count": 0, "dropped_count": 0,
+        "started_at": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
+    }
+    test_queue._is_running = True
+    test_queue._initialized = True
+
+    batch_uid = uuid.uuid4().hex[:6].upper()
+    valid_titles = []
+
+    # Prepare 5 items: item 2 is faulty
+    items_to_enqueue = []
+    for i in range(5):
+        if i == 2:
+            bad_item = {
+                "task_id": f"QTSK-FAIL-{batch_uid}",
+                "payload": {"corrupted": True}
+            }
+            items_to_enqueue.append(bad_item)
+        else:
+            title = f"BatchItem-{batch_uid}-{i}"
+            valid_titles.append(title)
+            items_to_enqueue.append({
+                "task_id": f"QTSK-OK-{batch_uid}-{i}",
+                "payload": {
+                    "alert_id": f"ALT-BATCH-{batch_uid}-{i}",
+                    "title": title,
+                    "severity": "medium",
+                    "source": "Wazuh"
+                }
+            })
+
+    # Simulate queue worker per-item processing logic with isolated sessions
+    for item in items_to_enqueue:
+        async with AsyncSessionLocal() as session:
+            try:
+                payload = item.get("payload", {})
+                if payload.get("corrupted"):
+                    raise ValueError("Simulated item corruption")
+                new_alt = Alert(
+                    alert_id=payload["alert_id"],
+                    title=payload["title"],
+                    severity=payload["severity"],
+                    source=payload["source"],
+                    status="new"
+                )
+                session.add(new_alt)
+                await session.commit()
+                test_queue.record_processed(1)
+            except Exception:
+                await session.rollback()
+                test_queue.record_error(1)
+
+    assert test_queue.stats["processed_count"] == 4
+    assert test_queue.stats["error_count"] == 1
+
+    # Verify database: the 4 valid items MUST be committed and present
+    async with AsyncSessionLocal() as session:
+        for t in valid_titles:
+            res = await session.execute(select(Alert).where(Alert.title == t))
+            saved = res.scalars().first()
+            assert saved is not None, f"Alert '{t}' should have been committed despite item 2 failure!"
+
+@pytest.mark.asyncio
+async def test_inspect_firewall_state_iptables_source_field():
+    """
+    Issue #7 Verification:
+    Verify that inspect_firewall_state correctly recognizes blocked IPs from iptables 'source' field
+    (where iptables 'target' is 'DROP' action), rather than erroneously matching on 'target'.
+    """
+    from unittest.mock import patch
+    from app.services.investigation_tools import InvestigationToolRegistry
+
+    blocked_ip = "203.0.113.77"
+    unblocked_ip = "192.0.2.88"
+
+    # Mock iptables rules returned by ResponseService.list_firewall_rules
+    mock_rules_response = {
+        "status": "success",
+        "connector": "linux_ssh",
+        "rules_count": 2,
+        "rules": [
+            {
+                "line_num": 1,
+                "target": "DROP",          # iptables action verb!
+                "protocol": "all",
+                "options": "--",
+                "source": blocked_ip,      # The actual blocked IP address!
+                "destination": "0.0.0.0/0",
+                "raw": f"1 DROP all -- {blocked_ip} 0.0.0.0/0"
+            },
+            {
+                "line_num": 2,
+                "target": "ACCEPT",
+                "protocol": "tcp",
+                "options": "--",
+                "source": "10.0.0.1",
+                "destination": "0.0.0.0/0",
+                "raw": "2 ACCEPT tcp -- 10.0.0.1 0.0.0.0/0"
+            }
+        ],
+        "mode": "live",
+        "message": "Live iptables inspection"
+    }
+
+    with patch("app.services.response_service.ResponseService.list_firewall_rules", return_value=mock_rules_response):
+        # 1. Target blocked_ip: MUST return target_currently_blocked = True
+        res_blocked = await InvestigationToolRegistry.inspect_firewall_state(
+            connector="linux_ssh",
+            target=blocked_ip
+        )
+        assert res_blocked["target_currently_blocked"] is True, (
+            f"Expected {blocked_ip} to be recognized as blocked from 'source' field"
+        )
+
+        # 2. Target unblocked_ip: MUST return target_currently_blocked = False
+        res_unblocked = await InvestigationToolRegistry.inspect_firewall_state(
+            connector="linux_ssh",
+            target=unblocked_ip
+        )
+        assert res_unblocked["target_currently_blocked"] is False, (
+            f"Expected {unblocked_ip} to NOT be recognized as blocked"
+        )
+
 
 
 

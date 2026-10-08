@@ -27,7 +27,7 @@ class IngestionQueueBuffer:
             "processed_count": 0,
             "error_count": 0,
             "dropped_count": 0,
-            "started_at": datetime.datetime.utcnow().isoformat()
+            "started_at": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
         }
         self._is_running = True
         self._initialized = True
@@ -35,6 +35,10 @@ class IngestionQueueBuffer:
     @property
     def queue_depth(self) -> int:
         return self._queue.qsize()
+
+    @property
+    def stats(self) -> Dict[str, Any]:
+        return self._stats
 
     @property
     def is_healthy(self) -> bool:
@@ -45,11 +49,11 @@ class IngestionQueueBuffer:
         """
         Enqueues an incoming raw alert payload. Returns immediately with task tracking metadata.
         """
-        task_id = f"QTSK-{datetime.datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+        task_id = f"QTSK-{datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
         item = {
             "task_id": task_id,
             "payload": raw_payload,
-            "enqueued_at": datetime.datetime.utcnow().isoformat(),
+            "enqueued_at": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
             "client_ip": client_ip
         }
 
@@ -103,7 +107,7 @@ class IngestionQueueBuffer:
             "capacity_used_pct": round((self.queue_depth / self._maxsize) * 100, 2) if self._maxsize > 0 else 0,
             "is_healthy": self.is_healthy,
             "stats": dict(self._stats),
-            "current_time": datetime.datetime.utcnow().isoformat()
+            "current_time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
         }
 
 # Global singleton buffer instance

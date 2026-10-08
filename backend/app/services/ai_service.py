@@ -175,7 +175,7 @@ Preliminary MITRE ATT&CK matches:
     async def _call_gemini(cls, api_key: str, model_name: str, prompt: str) -> Optional[Dict[str, Any]]:
         # Use v1beta endpoint for Gemini
         if not model_name or "gemini" not in model_name:
-            model_name = "gemini-1.5-flash"
+            model_name = "gemini-3.8-flash"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
         payload = {
             "contents": [

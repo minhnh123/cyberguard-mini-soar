@@ -10,6 +10,9 @@ async def run_queue_consumer_worker():
     Background worker that continuously drains the IngestionQueueBuffer
     and processes alerts in controlled batches using dedicated database sessions.
     Protects the primary database from race conditions and locks during alert storms.
+
+    IMPORTANT: Each alert item is processed in its own isolated DB session so that
+    a failure in one item does NOT roll back or affect other items in the same batch.
     """
     # Import locally to avoid circular dependency
     from app.api.alerts import process_alert_ingestion
@@ -23,15 +26,22 @@ async def run_queue_consumer_worker():
                 await asyncio.sleep(0.1)
                 continue
 
-            async with AsyncSessionLocal() as session:
-                for item in items:
+            # Process each item in its own isolated session for fault isolation.
+            # If item N fails, items 1..N-1 are already committed and safe.
+            for item in items:
+                async with AsyncSessionLocal() as session:
                     try:
                         payload = item.get("payload", {})
                         await process_alert_ingestion(payload, session)
+                        await session.commit()
                         ingestion_queue.record_processed(1)
                     except Exception as ex:
+                        await session.rollback()
                         ingestion_queue.record_error(1)
-                        logger.error(f"[Queue Worker Error] Failed processing task {item.get('task_id')}: {ex}")
+                        logger.error(
+                            f"[Queue Worker Error] Failed processing task "
+                            f"{item.get('task_id')} — rolled back cleanly. Error: {ex}"
+                        )
 
         except asyncio.CancelledError:
             logger.info("[Queue Worker] Ingestion worker cancelled. Exiting cleanly.")

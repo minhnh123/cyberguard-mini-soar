@@ -90,25 +90,25 @@ class ResponseService:
                 # Key auth failed or rejected, fall back to password auth
                 pass
 
-        # 2. Attempt Password Authentication with configured user & password
-        last_err = ""
-        credentials_to_try = [(user, password)] if password else []
-        for fallback_u, fallback_p in [("minh", "kali"), ("minh", "minh"), ("kali", "kali"), ("root", "toor")]:
-            if (fallback_u, fallback_p) not in credentials_to_try:
-                credentials_to_try.append((fallback_u, fallback_p))
+        # 2. Attempt Password Authentication with configured credentials only.
+        # SECURITY: No hardcoded fallback credentials — must be configured via Settings/Vault.
+        if not password:
+            raise ConnectionError(
+                f"SSH password authentication to {host} failed: No password configured. "
+                "Set LINUX_SSH_PASSWORD in Settings or configure SSH key-based auth."
+            )
 
-        for u, p in credentials_to_try:
-            try:
-                client.connect(hostname=host, port=port, username=u, password=p, timeout=2.0)
-                return client, u, p, "password"
-            except paramiko.AuthenticationException as ex:
-                last_err = str(ex)
-                continue
-            except Exception as ex:
-                last_err = str(ex)
-                break
+        try:
+            client.connect(hostname=host, port=port, username=user, password=password, timeout=2.0)
+            return client, user, password, "password"
+        except paramiko.AuthenticationException as ex:
+            raise ConnectionError(
+                f"SSH authentication to VM {host} failed for user '{user}': {ex}. "
+                "Check LINUX_SSH_USER and LINUX_SSH_PASSWORD in Settings."
+            )
+        except Exception as ex:
+            raise ConnectionError(f"SSH connection to VM {host} failed: {ex}")
 
-        raise ConnectionError(f"SSH connection to VM {host} failed (User: {user}): {last_err or 'Authentication failed'}")
 
     @classmethod
     def _execute_sudo_command(
@@ -1034,7 +1034,7 @@ class ResponseService:
 
         # 2. Enterprise Simulation / Lab Mode
         jti_sample = [f"jti_{uuid.uuid4().hex[:8]}" for _ in range(3)]
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
         
         if action_clean in ["revoke_user_sessions", "revoke_sessions"]:
             return {
@@ -1130,7 +1130,7 @@ class ResponseService:
         host_target = str(target).strip()
         pid = str(parameters.get("pid") or parameters.get("process_id") or "4821")
         process_name = parameters.get("process_name") or parameters.get("process") or "ransomware.exe"
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
 
         # 1. Dispatch to live Wazuh AR API if Wazuh provider and host is a recognized numeric agent
         if provider == "wazuh" and host_target in ["000", "001", "002"]:

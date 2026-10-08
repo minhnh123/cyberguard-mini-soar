@@ -20,7 +20,7 @@ class SuppressionService:
         if not alert_dict or not db:
             return False, None
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
         # Query all active rules
         stmt = select(SuppressionRule).where(SuppressionRule.is_active == True)
@@ -73,7 +73,7 @@ class SuppressionService:
         created_by: str = "SOC Analyst",
         db=None
     ) -> SuppressionRule:
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         expires_at = now + datetime.timedelta(hours=duration_hours) if duration_hours else None
 
         rule = SuppressionRule(

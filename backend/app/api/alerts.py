@@ -207,7 +207,7 @@ async def find_correlated_incident(
     if not source_ip and not file_hash and not (agent_id and rule_id):
         return None
 
-    cutoff_time = datetime.datetime.utcnow() - datetime.timedelta(minutes=window_minutes)
+    cutoff_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(minutes=window_minutes)
 
     query = (
         select(Incident)
@@ -288,7 +288,7 @@ async def process_alert_ingestion(raw_payload: Dict[str, Any], db: AsyncSession)
         new_alert.status = "correlated"
 
         existing_incident.alert_count = (existing_incident.alert_count or 1) + 1
-        existing_incident.updated_at = datetime.datetime.utcnow()
+        existing_incident.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
         # Nâng mức nghiêm trọng nếu cảnh báo mới có severity cao hơn
         sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
@@ -323,7 +323,7 @@ async def process_alert_ingestion(raw_payload: Dict[str, Any], db: AsyncSession)
         return new_alert
 
     # 3. Tạo mới Incident nếu chưa có sự cố tương quan
-    inc_number = f"INC-{datetime.datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    inc_number = f"INC-{datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
     new_incident = Incident(
         incident_number=inc_number,
         title=f"Incident: {new_alert.title}",

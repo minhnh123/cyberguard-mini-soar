@@ -41,7 +41,7 @@ async def handle_approval_decision(
         raise HTTPException(status_code=400, detail=f"Approval is already resolved with status '{approval.status}'")
 
     approval.analyst_note = request.analyst_note
-    approval.resolved_at = datetime.datetime.utcnow()
+    approval.resolved_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     # 1. Safety Guardrails MUST be validated FIRST on approve!
     if request.decision.lower() == "approve":
@@ -285,7 +285,7 @@ async def handle_approval_rollback(
     approval.status = "reverted"
     existing_note = approval.analyst_note or ""
     approval.analyst_note = f"{existing_note} | Hoàn tác: {analyst_note}".strip(" |")
-    approval.resolved_at = datetime.datetime.utcnow()
+    approval.resolved_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     # Deactivate Desired Security State in Reconciliation Engine
     from app.services.reconciliation_service import ReconciliationService

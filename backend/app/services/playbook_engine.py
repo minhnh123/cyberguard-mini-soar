@@ -34,7 +34,7 @@ class PlaybookEngine:
                     checkpoint_history=[],
                     is_resumable=True,
                     logs=[{
-                        "time": datetime.datetime.utcnow().isoformat(),
+                        "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                         "step": "start",
                         "message": f"Playbook '{pb.name}' triggered for Incident {incident.incident_number}"
                     }]
@@ -145,7 +145,7 @@ class PlaybookEngine:
             execution.current_node_id = node_id
 
             logs.append({
-                "time": datetime.datetime.utcnow().isoformat(),
+                "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                 "node_id": node_id,
                 "step_index": idx,
                 "step": step_name,
@@ -168,7 +168,7 @@ class PlaybookEngine:
 
                     context_data["enrichment"] = enrich_results
                     logs.append({
-                        "time": datetime.datetime.utcnow().isoformat(),
+                        "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                         "node_id": node_id,
                         "step": step_name,
                         "status": "success",
@@ -190,7 +190,7 @@ class PlaybookEngine:
                     incident.ai_analysis = ai_result
 
                     logs.append({
-                        "time": datetime.datetime.utcnow().isoformat(),
+                        "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                         "node_id": node_id,
                         "step": step_name,
                         "status": "success",
@@ -257,14 +257,14 @@ class PlaybookEngine:
                     checkpoint_history.append({
                         "node_id": node_id,
                         "step": step_name,
-                        "time": datetime.datetime.utcnow().isoformat(),
+                        "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                         "status": "paused_waiting_approval"
                     })
                     execution.checkpoint_history = list(checkpoint_history)
                     execution.context_state = context_data
 
                     logs.append({
-                        "time": datetime.datetime.utcnow().isoformat(),
+                        "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                         "node_id": node_id,
                         "step": step_name,
                         "status": "paused_waiting_approval",
@@ -321,7 +321,7 @@ class PlaybookEngine:
                     db.add(action_log)
 
                     logs.append({
-                        "time": datetime.datetime.utcnow().isoformat(),
+                        "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                         "node_id": node_id,
                         "step": step_name,
                         "status": exec_res.get("status", "success"),
@@ -332,7 +332,7 @@ class PlaybookEngine:
                 checkpoint_history.append({
                     "node_id": node_id,
                     "step": step_name,
-                    "time": datetime.datetime.utcnow().isoformat(),
+                    "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                     "status": "success"
                 })
                 execution.checkpoint_history = list(checkpoint_history)
@@ -344,7 +344,7 @@ class PlaybookEngine:
 
             except Exception as e:
                 logs.append({
-                    "time": datetime.datetime.utcnow().isoformat(),
+                    "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                     "node_id": node_id,
                     "step": step_name,
                     "status": "failed",
@@ -359,7 +359,7 @@ class PlaybookEngine:
         # Completed all steps
         if execution.status != "paused_waiting_approval":
             execution.status = "completed"
-            execution.finished_at = datetime.datetime.utcnow()
+            execution.finished_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
         execution.logs = logs
         await db.commit()
@@ -401,7 +401,7 @@ class PlaybookEngine:
 
         logs = list(execution.logs or [])
         logs.append({
-            "time": datetime.datetime.utcnow().isoformat(),
+            "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
             "step": "workflow_resumed",
             "status": "resumed",
             "message": f"Analyst decision '{approval_decision.get('decision')}' received. Resuming workflow from step index {execution.current_step_index}."
@@ -437,7 +437,7 @@ class PlaybookEngine:
         for ex in stuck:
             logs = list(ex.logs or [])
             logs.append({
-                "time": datetime.datetime.utcnow().isoformat(),
+                "time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
                 "step": "server_boot_recovery",
                 "status": "recovered",
                 "message": "System restart detected. Preserved durable checkpoint."

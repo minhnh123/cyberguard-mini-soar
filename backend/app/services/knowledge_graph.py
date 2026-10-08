@@ -36,7 +36,7 @@ class KnowledgeGraphService:
         )
         entity = res.scalars().first()
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         if entity:
             entity.last_seen = now
             entity.incident_count = (entity.incident_count or 1) + 1
@@ -97,7 +97,7 @@ class KnowledgeGraphService:
             incident_id=incident_id,
             weight=weight,
             context_metadata=metadata or {},
-            created_at=datetime.datetime.utcnow()
+            created_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         )
         db.add(relation)
         await db.commit()

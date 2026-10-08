@@ -112,7 +112,7 @@ class RBACService:
             }
 
         # Dual-Custody Flow
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
         # Case 1: First signature
         if not approval.first_approver:

@@ -44,7 +44,7 @@ class FeedbackService:
             original_severity=inc.severity,
             corrected_severity=corrected_severity or inc.severity,
             created_by=created_by,
-            created_at=datetime.datetime.utcnow()
+            created_at=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         )
         db.add(feedback)
 

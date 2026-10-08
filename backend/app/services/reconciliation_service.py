@@ -42,7 +42,7 @@ class ReconciliationService:
         res = await db.execute(stmt)
         state = res.scalars().first()
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         if state:
             state.incident_id = incident_id
             state.is_active = True
@@ -115,9 +115,15 @@ class ReconciliationService:
         if state.connector in ["linux_ssh", "windows_firewall"]:
             rules_res = await ResponseService.list_firewall_rules(state.connector, db=db)
             active_rules = rules_res.get("rules", [])
-            # Search for target in active rules list
+            # Search for target in active rules list (checking iptables 'source' and windows 'remote_ip')
             matching_rule = any(
-                r.get("target") == state.target or state.target in str(r.get("rule_string", ""))
+                state.target == str(r.get("source") or "").strip()
+                or state.target in str(r.get("source") or "")
+                or state.target == str(r.get("remote_ip") or "").strip()
+                or state.target in str(r.get("remote_ip") or "")
+                or state.target in str(r.get("name") or r.get("rule_name") or "")
+                or state.target in str(r.get("raw") or "")
+                or (str(r.get("target") or "").upper() not in ["DROP", "ACCEPT", "REJECT", "RETURN", "LOG"] and state.target == str(r.get("target") or "").strip())
                 for r in active_rules
             )
             if not matching_rule:
@@ -139,7 +145,7 @@ class ReconciliationService:
         elif state.connector == "wazuh":
             actual_val = "ISOLATED" # Wazuh AR rule state verification
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         state.last_reconciled_at = now
 
         # Handle Drift & Self-Healing
@@ -241,7 +247,7 @@ class ReconciliationService:
             "in_sync_count": in_sync,
             "drifted_count": drifted,
             "auto_healed_count": healed,
-            "reconciled_at": datetime.datetime.utcnow().isoformat(),
+            "reconciled_at": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
             "details": results
         }
 

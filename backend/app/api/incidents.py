@@ -175,7 +175,7 @@ async def update_incident(
     if "summary" in payload:
         inc.summary = payload["summary"]
 
-    inc.updated_at = datetime.datetime.utcnow()
+    inc.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     await db.commit()
     await db.refresh(inc)
     return inc
@@ -237,7 +237,7 @@ async def reanalyze_incident_ai(
     inc.mitre_tactics = ai_res.get("mitre_tactics", [])
     inc.mitre_techniques = ai_res.get("mitre_techniques", [])
     inc.ai_analysis = ai_res
-    inc.updated_at = datetime.datetime.utcnow()
+    inc.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     # Record in ActionLog
     action_log = ActionLog(
@@ -353,7 +353,7 @@ async def unblock_incident_target(
     # Chuyển trạng thái sự cố sang closed nếu đang contained
     if inc.status == "contained":
         inc.status = "closed"
-    inc.updated_at = datetime.datetime.utcnow()
+    inc.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     await db.commit()
     await db.refresh(inc)

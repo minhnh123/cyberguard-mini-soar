@@ -81,7 +81,7 @@ async def update_playbook(playbook_id: int, payload: PlaybookUpdate, db: AsyncSe
     if payload.yaml_definition is not None:
         pb.yaml_definition = payload.yaml_definition
 
-    pb.updated_at = datetime.datetime.utcnow()
+    pb.updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     await db.commit()
     await db.refresh(pb)
     return pb
@@ -127,7 +127,7 @@ async def run_playbook_manually(playbook_id: int, incident_id: int, db: AsyncSes
         incident_id=inc.id,
         status="running",
         current_step="start",
-        logs=[{"time": datetime.datetime.utcnow().isoformat(), "step": "manual_trigger", "message": f"Manually started playbook {pb.name}"}]
+        logs=[{"time": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(), "step": "manual_trigger", "message": f"Manually started playbook {pb.name}"}]
     )
     db.add(execution)
     await db.commit()

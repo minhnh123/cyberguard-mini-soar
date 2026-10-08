@@ -25,7 +25,7 @@ class EnrichmentService:
         )
         cache_entry = result.scalars().first()
         if cache_entry:
-            if cache_entry.expires_at and cache_entry.expires_at < datetime.datetime.utcnow():
+            if cache_entry.expires_at and cache_entry.expires_at < datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None):
                 await db.delete(cache_entry)
                 await db.commit()
                 return None
@@ -34,7 +34,7 @@ class EnrichmentService:
 
     @staticmethod
     async def set_cached_ioc(db, ioc_type: str, ioc_value: str, source: str, data: Dict[str, Any], score: int = 0, ttl_hours: int = 24):
-        expires = datetime.datetime.utcnow() + datetime.timedelta(hours=ttl_hours)
+        expires = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(hours=ttl_hours)
         cache_entry = ThreatIntelCache(
             ioc_type=ioc_type,
             ioc_value=ioc_value,

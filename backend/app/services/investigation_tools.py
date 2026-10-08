@@ -142,7 +142,7 @@ class InvestigationToolRegistry:
                 "summary": f"Detected 6 prior correlated events targeting this resource in the last {timeframe_hours}h."
             }
 
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=timeframe_hours)
+        cutoff = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(hours=timeframe_hours)
         
         # Query alerts with matching target
         query = (
@@ -174,7 +174,7 @@ class InvestigationToolRegistry:
     async def query_identity_directory(cls, user_id: str, db=None) -> Dict[str, Any]:
         user_clean = user_id or "alex.morgan@cyberguard.corp"
         is_admin = "admin" in user_clean.lower() or "morgan" in user_clean.lower()
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
 
         configs = await ResponseService.get_connector_settings(db, "IDENTITY")
         provider = configs.get("IDENTITY_PROVIDER") or "mock"
@@ -201,7 +201,7 @@ class InvestigationToolRegistry:
     @classmethod
     async def query_endpoint_telemetry(cls, target: str, db=None) -> Dict[str, Any]:
         target_clean = target or "SRV-FINANCE-01"
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
 
         return {
             "target": target_clean,
@@ -225,7 +225,38 @@ class InvestigationToolRegistry:
         rules = rules_res.get("rules", [])
         target_clean = target.strip()
 
-        is_already_blocked = any(target_clean in str(r.get("target") or r.get("rule_name") or "") for r in rules) if target_clean else False
+        def _is_rule_blocking_target(r: Dict[str, Any], tgt: str) -> bool:
+            if not tgt:
+                return False
+            # 1. Linux SSH iptables rules: 'source' field holds the blocked IP address
+            src = str(r.get("source") or "").strip()
+            if src and (tgt == src or tgt in src):
+                return True
+
+            # 2. Windows Firewall rules: 'remote_ip' field holds the blocked remote IP
+            remote_ip = str(r.get("remote_ip") or "").strip()
+            if remote_ip and (tgt == remote_ip or tgt in remote_ip):
+                return True
+
+            # 3. Rule name or identifier containing the target
+            rule_name = str(r.get("name") or r.get("rule_name") or "").strip()
+            if tgt in rule_name:
+                return True
+
+            # 4. Raw rule string match
+            raw_rule = str(r.get("raw") or "").strip()
+            if tgt in raw_rule:
+                return True
+
+            # 5. Fallback for custom connectors where 'target' field stores IP rather than action verb
+            custom_tgt = str(r.get("target") or "").strip()
+            if custom_tgt and custom_tgt.upper() not in ["DROP", "ACCEPT", "REJECT", "RETURN", "LOG"]:
+                if tgt == custom_tgt or tgt in custom_tgt:
+                    return True
+
+            return False
+
+        is_already_blocked = any(_is_rule_blocking_target(r, target_clean) for r in rules) if target_clean else False
 
         return {
             "connector": connector,

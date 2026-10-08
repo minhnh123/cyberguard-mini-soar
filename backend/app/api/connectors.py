@@ -164,7 +164,7 @@ async def delete_firewall_rule_endpoint(
         appr.status = "reverted"
         existing_note = appr.analyst_note or ""
         appr.analyst_note = f"{existing_note} | Gỡ bỏ trực tiếp từ VM Rules Inspector".strip(" |")
-        appr.resolved_at = datetime.datetime.utcnow()
+        appr.resolved_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
         # Add ActionLog for complete SOC auditability
         action_log = ActionLog(
