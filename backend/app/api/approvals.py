@@ -1,4 +1,5 @@
 import datetime
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.future import select
@@ -12,6 +13,7 @@ from app.schemas.schemas import PendingApprovalResponse, ApprovalDecisionRequest
 from app.services.response_service import ResponseService
 from app.services.websocket_manager import ws_manager
 
+logger = logging.getLogger("soar.approvals")
 router = APIRouter(prefix="/approvals", tags=["Approvals"])
 
 @router.get("", response_model=List[PendingApprovalResponse])
@@ -169,7 +171,7 @@ async def handle_approval_decision(
                     db=db
                 )
             except Exception as rc_err:
-                print(f"[Reconciler Warning] Could not record desired state: {rc_err}")
+                logger.warning(f"[Reconciler Warning] Could not record desired state: {rc_err}")
 
         # If incident status was open/investigating, and this was an isolation or block, update incident
         inc_res = await db.execute(select(Incident).where(Incident.id == approval.incident_id))
@@ -193,7 +195,7 @@ async def handle_approval_decision(
                     db=db
                 )
             except Exception as pb_ex:
-                print(f"[Approval Warning] Could not resume playbook execution: {pb_ex}")
+                logger.warning(f"[Approval Warning] Could not resume playbook execution: {pb_ex}")
 
         await db.commit()
 
@@ -297,7 +299,7 @@ async def handle_approval_rollback(
             db=db
         )
     except Exception as rc_err:
-        print(f"[Reconciler Warning] Could not deactivate desired state: {rc_err}")
+        logger.warning(f"[Reconciler Warning] Could not deactivate desired state: {rc_err}")
 
     await db.commit()
 

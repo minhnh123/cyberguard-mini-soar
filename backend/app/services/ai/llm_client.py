@@ -1,8 +1,11 @@
 import json
+import logging
 import re
 from typing import Dict, Any, Optional
 import httpx
 from app.services.ai.prompts import SYSTEM_TRIAGE_PROMPT
+
+logger = logging.getLogger("soar.llm_client")
 
 
 class LLMClient:
@@ -29,9 +32,15 @@ class LLMClient:
 
     @classmethod
     async def call_gemini(cls, api_key: str, model_name: str, prompt: str) -> Optional[Dict[str, Any]]:
-        if not model_name or "gemini" not in model_name:
-            model_name = "gemini-3.8-flash"
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        """
+        Invokes Google Gemini API with automatic model fallback (gemini-2.0-flash -> gemini-1.5-flash).
+        Handles transient 429 quota exhaustion and 503 high demand gracefully.
+        """
+        primary_model = model_name if (model_name and "gemini" in model_name) else "gemini-2.0-flash"
+        # Determine fallback model candidate
+        fallback_model = "gemini-1.5-flash" if primary_model != "gemini-1.5-flash" else "gemini-2.0-flash"
+        candidate_models = [primary_model, fallback_model]
+
         payload = {
             "contents": [
                 {
@@ -45,15 +54,30 @@ class LLMClient:
                 "responseMimeType": "application/json"
             }
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return cls.clean_and_parse_json(text)
-            else:
-                print(f"[Gemini API Error] {resp.status_code}: {resp.text}")
-                return None
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for current_model in candidate_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent?key={api_key}"
+                try:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates and "content" in candidates[0]:
+                            parts = candidates[0]["content"].get("parts", [])
+                            if parts and "text" in parts[0]:
+                                parsed = cls.clean_and_parse_json(parts[0]["text"])
+                                if parsed:
+                                    return parsed
+                    else:
+                        logger.warning(
+                            f"[Gemini API Warning] Model '{current_model}' returned {resp.status_code}: {resp.text[:200]}..."
+                        )
+                except Exception as ex:
+                    logger.warning(f"[Gemini API Exception] Model '{current_model}' call failed: {ex}")
+
+        logger.error("[Gemini API Error] All Gemini candidate models failed. Falling back to heuristic engine.")
+        return None
 
     @classmethod
     async def call_openai_compatible(
@@ -84,12 +108,18 @@ class LLMClient:
             "response_format": {"type": "json_object"} if provider != "deepseek" else None
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                text = data["choices"][0]["message"]["content"]
-                return cls.clean_and_parse_json(text)
-            else:
-                print(f"[{provider} API Error] {resp.status_code}: {resp.text}")
-                return None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    choices = data.get("choices", [])
+                    if choices and "message" in choices[0]:
+                        content = choices[0]["message"].get("content", "")
+                        return cls.clean_and_parse_json(content)
+                else:
+                    logger.warning(f"[{provider} API Error] {resp.status_code}: {resp.text[:200]}")
+                    return None
+        except Exception as e:
+            logger.warning(f"[{provider} API Exception] {e}")
+            return None

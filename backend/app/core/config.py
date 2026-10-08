@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # AI Default Settings (can be overridden via DB settings)
     DEFAULT_AI_PROVIDER: str = "gemini"  # gemini, openai, deepseek, custom
     DEFAULT_AI_API_KEY: str = ""
-    DEFAULT_AI_MODEL: str = "gemini-3.8-flash"
+    DEFAULT_AI_MODEL: str = "gemini-2.0-flash"
 
     # VirusTotal
     VIRUSTOTAL_API_KEY: str = ""

@@ -6,6 +6,7 @@ from app.core.database import AsyncSessionLocal
 from app.models.models import PendingApproval, ActionLog, Incident
 from app.services.response_service import ResponseService
 from app.services.websocket_manager import ws_manager
+from app.services.worker_health import worker_health
 
 logger = logging.getLogger("soar.ttl_worker")
 
@@ -166,12 +167,25 @@ async def start_ttl_worker(interval_seconds: int = 15):
     """
     Background loop executing check_and_rollback_expired_actions periodically.
     """
+    worker_health.register("ttl_worker", "Auto-Rollback TTL Worker for expired incident containment actions")
     logger.info(f"[CyberGuard SOAR] Auto-Rollback TTL Worker started (Polling every {interval_seconds}s).")
+    total_scans = 0
     try:
         while True:
+            total_scans += 1
             await check_and_rollback_expired_actions()
+            worker_health.record_heartbeat(
+                "ttl_worker",
+                metrics={
+                    "total_scans": total_scans,
+                    "interval_seconds": interval_seconds
+                },
+                status="healthy"
+            )
             await asyncio.sleep(interval_seconds)
     except asyncio.CancelledError:
+        worker_health.record_stop("ttl_worker")
         logger.info("[CyberGuard SOAR] Auto-Rollback TTL Worker stopping.")
     except Exception as e:
+        worker_health.record_error("ttl_worker", str(e))
         logger.error(f"[CyberGuard SOAR] Auto-Rollback TTL Worker unhandled exception: {e}")

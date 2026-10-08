@@ -1,7 +1,10 @@
 import json
+import logging
 from sqlalchemy.future import select
 from app.models.models import Playbook, SystemSetting
 from app.core.database import AsyncSessionLocal
+
+logger = logging.getLogger("soar.seed")
 
 INITIAL_PLAYBOOKS = [
     {
@@ -329,4 +332,4 @@ async def seed_database():
                 added = True
         if added:
             await session.commit()
-            print("[Seed] Playbooks synchronized successfully.")
+            logger.info("[Seed] Playbooks synchronized successfully.")

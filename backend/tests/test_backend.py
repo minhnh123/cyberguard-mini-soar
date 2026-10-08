@@ -123,10 +123,15 @@ async def test_alert_deduplication_and_correlation():
 async def test_incident_unblock_rollback():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Get incidents
+        # Get incidents (create one if running in isolation)
         inc_resp = await client.get("/api/v1/incidents")
         assert inc_resp.status_code == 200
         incidents = inc_resp.json()
+        if not incidents:
+            sim_resp = await client.post("/api/v1/alerts/simulate?scenario=ssh_bruteforce")
+            assert sim_resp.status_code == 200
+            inc_resp = await client.get("/api/v1/incidents")
+            incidents = inc_resp.json()
         assert len(incidents) > 0
         target_inc = incidents[0]
 
@@ -1356,6 +1361,56 @@ async def test_inspect_firewall_state_iptables_source_field():
         assert res_unblocked["target_currently_blocked"] is False, (
             f"Expected {unblocked_ip} to NOT be recognized as blocked"
         )
+
+
+@pytest.mark.asyncio
+async def test_background_worker_health_check():
+    """
+    Test background worker health check endpoint and registry:
+    Ensures TTL Worker and Queue Worker status and metrics are reported in /health and /health/workers.
+    """
+    from app.services.worker_health import worker_health
+    # Register/heartbeat simulation
+    worker_health.record_heartbeat("ttl_worker", metrics={"test_metric": 1}, status="healthy")
+    worker_health.record_heartbeat("queue_worker", metrics={"buffer_size": 0}, status="healthy")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Health check includes workers
+        resp = await client.get("/api/v1/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "operational"
+        assert "workers" in data
+        assert "ttl_worker" in data["workers"]
+        assert "queue_worker" in data["workers"]
+        assert data["workers"]["ttl_worker"]["status"] == "healthy"
+
+        # 2. Dedicated /health/workers endpoint
+        worker_resp = await client.get("/api/v1/health/workers")
+        assert worker_resp.status_code == 200
+        w_data = worker_resp.json()
+        assert w_data["status"] == "operational"
+        assert "ttl_worker" in w_data["workers"]
+        assert "queue_worker" in w_data["workers"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_model_fallback_and_default():
+    """
+    Test Gemini model configuration and fallback:
+    - Default model is gemini-2.0-flash
+    - LLMClient.call_gemini cleanly handles fallback when cloud model errors
+    """
+    from app.core.config import settings
+    from app.services.ai.llm_client import LLMClient
+
+    assert settings.DEFAULT_AI_MODEL == "gemini-2.0-flash"
+
+    # Test that LLMClient handles an invalid or rate-limited API key with fallback and returns None cleanly (without unhandled crash)
+    result = await LLMClient.call_gemini(api_key="invalid_test_key", model_name="gemini-2.0-flash", prompt="ping")
+    assert result is None
+
 
 
 

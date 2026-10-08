@@ -1,10 +1,13 @@
 import json
+import logging
 from typing import Dict, Any, Optional
 from sqlalchemy.future import select
 from app.core.config import settings
 from app.models.models import SystemSetting
 from app.services.mitre_service import MitreService
 from app.services.ai import SYSTEM_TRIAGE_PROMPT, LLMClient, HeuristicEngine
+
+logger = logging.getLogger("soar.ai_service")
 
 
 class AIService:
@@ -137,7 +140,7 @@ Preliminary MITRE ATT&CK matches:
                         )
                     return result
             except Exception as e:
-                print(f"[AI Service Error] Cloud LLM error: {e}. Falling back to heuristic reasoning.")
+                logger.warning(f"[AI Service Error] Cloud LLM error: {e}. Falling back to heuristic reasoning.")
 
         # Fallback heuristic SOC analysis with full ReAct multi-turn trail
         return await cls._fallback_heuristic_triage(alert_data, enrichment_data, local_mitre, db=db, analyst_query=analyst_query)

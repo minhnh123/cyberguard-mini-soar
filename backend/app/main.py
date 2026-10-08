@@ -1,10 +1,17 @@
 import contextlib
+import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.logging_config import setup_logging
 from app.core.database import init_db
 from app.seed_data.seed import seed_database
 from app.services.websocket_manager import ws_manager
+from app.services.worker_health import worker_health
+
+# Initialize central structured logging
+setup_logging()
+logger = logging.getLogger("soar.main")
 
 from app.api.alerts import router as alerts_router
 from app.api.incidents import router as incidents_router
@@ -23,7 +30,7 @@ from app.services.ttl_worker import start_ttl_worker
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("[CyberGuard SOAR] Initializing Database & Seed Data...")
+    logger.info("[CyberGuard SOAR] Initializing Database & Seed Data...")
     await init_db()
     await seed_database()
 
@@ -34,9 +41,9 @@ async def lifespan(app: FastAPI):
         async with AsyncSessionLocal() as session:
             rec_count = await PlaybookEngine.recover_interrupted_executions(session)
             if rec_count > 0:
-                print(f"[CyberGuard SOAR] Đã phục hồi {rec_count} checkpoint Playbook Execution bị gián đoạn.")
+                logger.info(f"[CyberGuard SOAR] Đã phục hồi {rec_count} checkpoint Playbook Execution bị gián đoạn.")
     except Exception as rec_err:
-        print(f"[CyberGuard SOAR Recovery Warning] {rec_err}")
+        logger.warning(f"[CyberGuard SOAR Recovery Warning] {rec_err}")
 
     # Khởi động TTL Auto-Rollback Worker
     ttl_task = asyncio.create_task(start_ttl_worker(interval_seconds=15))
@@ -51,14 +58,14 @@ async def lifespan(app: FastAPI):
         from app.core.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             await VaultService.get_or_create_soar_ssh_keypair(db=session)
-            print("[CyberGuard SOAR] AES-256-GCM Vault & Ed25519 SSH Keypair verified.")
+            logger.info("[CyberGuard SOAR] AES-256-GCM Vault & Ed25519 SSH Keypair verified.")
     except Exception as vault_err:
-        print(f"[CyberGuard SOAR Vault Warning] {vault_err}")
+        logger.warning(f"[CyberGuard SOAR Vault Warning] {vault_err}")
 
-    print("[CyberGuard SOAR] Ready to receive alerts and orchestrate incident responses.")
+    logger.info("[CyberGuard SOAR] Ready to receive alerts and orchestrate incident responses.")
     yield
     # Shutdown
-    print("[CyberGuard SOAR] Shutting down.")
+    logger.info("[CyberGuard SOAR] Shutting down.")
     ttl_task.cancel()
     queue_task.cancel()
     try:
@@ -118,7 +125,15 @@ async def health_check():
     return {
         "system": settings.PROJECT_NAME,
         "status": "operational",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "workers": worker_health.get_all_health()
+    }
+
+@app.get(f"{settings.API_V1_STR}/health/workers")
+async def worker_health_check():
+    return {
+        "status": "operational",
+        "workers": worker_health.get_all_health()
     }
 
 # Serve Frontend SPA

@@ -430,10 +430,10 @@ export default function SettingsPage() {
               type="text"
               value={formData['AI_MODEL'] || ''}
               onChange={(e) => handleChange('AI_MODEL', e.target.value)}
-              placeholder="e.g. gemini-1.5-flash or gpt-4o-mini"
+              placeholder="e.g. gemini-2.0-flash or gpt-4o-mini"
               className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 font-mono text-cyan-300 focus:outline-none focus:border-cyan-500"
             />
-            <span className="text-[10px] text-slate-500 mt-1 block">Default: gemini-1.5-flash</span>
+            <span className="text-[10px] text-slate-500 mt-1 block">Default: gemini-2.0-flash</span>
           </div>
 
           <div>
