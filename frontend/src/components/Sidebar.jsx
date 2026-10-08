@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   ShieldAlert, 
@@ -11,10 +12,14 @@ import {
 } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab, pendingApprovalsCount = 0, openIncidentsCount = 0 }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const navItems = [
-    { id: 'dashboard', label: 'SOC Dashboard', icon: LayoutDashboard },
+    { id: 'dashboard', path: '/dashboard', label: 'SOC Dashboard', icon: LayoutDashboard },
     { 
       id: 'incidents', 
+      path: '/incidents',
       label: 'Incident Triage', 
       icon: ShieldAlert, 
       badge: openIncidentsCount > 0 ? openIncidentsCount : null,
@@ -22,16 +27,19 @@ export default function Sidebar({ activeTab, setActiveTab, pendingApprovalsCount
     },
     { 
       id: 'approvals', 
+      path: '/approvals',
       label: 'Human Approvals', 
       icon: CheckCircle2, 
       badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null,
       badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse' 
     },
-    { id: 'playbooks', label: 'Playbook Builder', icon: Workflow },
-    { id: 'threat-intel', label: 'Threat Intel Scanner', icon: Search },
-    { id: 'simulator', label: 'Attack Simulator', icon: Radio },
-    { id: 'settings', label: 'Settings & Connectors', icon: Settings },
+    { id: 'playbooks', path: '/playbooks', label: 'Playbook Builder', icon: Workflow },
+    { id: 'threat-intel', path: '/threat-intel', label: 'Threat Intel Scanner', icon: Search },
+    { id: 'simulator', path: '/simulator', label: 'Attack Simulator', icon: Radio },
+    { id: 'settings', path: '/settings', label: 'Settings & Connectors', icon: Settings },
   ];
+
+  const currentPath = location.pathname;
 
   return (
     <aside className="w-64 bg-slate-900/90 border-r border-slate-800 flex flex-col shrink-0 h-screen sticky top-0">
@@ -58,11 +66,17 @@ export default function Sidebar({ activeTab, setActiveTab, pendingApprovalsCount
         </div>
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = activeTab === item.id;
+          const isActive = 
+            (item.id === 'dashboard' && (currentPath === '/' || currentPath === '/dashboard')) ||
+            (item.id !== 'dashboard' && currentPath.startsWith(item.path)) ||
+            activeTab === item.id;
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                navigate(item.path);
+                if (setActiveTab) setActiveTab(item.id);
+              }}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                 isActive
                   ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm shadow-cyan-950'

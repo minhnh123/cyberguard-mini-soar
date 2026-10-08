@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
 import ToastContainer, { playAudioCue } from './components/ToastContainer';
@@ -12,21 +13,28 @@ import SettingsPage from './pages/SettingsPage';
 import { StatsAPI } from './services/api';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [selectedIncidentId, setSelectedIncidentId] = useState(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [stats, setStats] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // WebSocket & Toast Notifications State
   const [toasts, setToasts] = useState([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const soundEnabledRef = useRef(soundEnabled);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastWsEvent, setLastWsEvent] = useState(null);
+
+  // Sync ref whenever soundEnabled state changes without triggering effects
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
 
   const addToast = (toast) => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev.slice(-4), { ...toast, id }]);
-    if (soundEnabled) {
+    if (soundEnabledRef.current) {
       playAudioCue(toast.severity || 'info');
     }
     setTimeout(() => {
@@ -50,7 +58,7 @@ export default function App() {
     }
   };
 
-  // WebSocket Real-time Connection
+  // WebSocket Real-time Connection (Isolated from soundEnabled toggle to avoid reconnection storms)
   useEffect(() => {
     let ws = null;
     let reconnectTimeout = null;
@@ -140,7 +148,7 @@ export default function App() {
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
-  }, [soundEnabled]);
+  }, []);
 
   useEffect(() => {
     fetchStats();
@@ -148,17 +156,29 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Determine active tab from URL path
+  const getActiveTab = () => {
+    const p = location.pathname;
+    if (p.startsWith('/incidents')) return 'incidents';
+    if (p.startsWith('/approvals')) return 'approvals';
+    if (p.startsWith('/playbooks')) return 'playbooks';
+    if (p.startsWith('/threat-intel')) return 'threat-intel';
+    if (p.startsWith('/simulator')) return 'simulator';
+    if (p.startsWith('/settings')) return 'settings';
+    return 'dashboard';
+  };
+  const activeTab = getActiveTab();
+
   const handleSelectIncident = (id) => {
-    setSelectedIncidentId(id);
-    setActiveTab('incidents');
+    navigate(`/incidents/${id}`);
   };
 
   const handleGoApprovals = () => {
-    setActiveTab('approvals');
+    navigate('/approvals');
   };
 
   const handleOpenSimulator = () => {
-    setActiveTab('simulator');
+    navigate('/simulator');
   };
 
   const pendingApprovalsCount = stats?.kpis?.pending_approvals || 0;
@@ -176,13 +196,9 @@ export default function App() {
         onToggleSound={() => setSoundEnabled((prev) => !prev)}
       />
 
-      {/* Sidebar */}
+      {/* Sidebar with Route Integration */}
       <Sidebar
         activeTab={activeTab}
-        setActiveTab={(tab) => {
-          setActiveTab(tab);
-          if (tab !== 'incidents') setSelectedIncidentId(null);
-        }}
         pendingApprovalsCount={pendingApprovalsCount}
         openIncidentsCount={openIncidentsCount}
       />
@@ -200,42 +216,58 @@ export default function App() {
         />
 
         <main className="flex-1 overflow-y-auto bg-slate-950/80">
-          {activeTab === 'dashboard' && (
-            <DashboardPage
-              lastWsEvent={lastWsEvent}
-              onSelectIncident={handleSelectIncident}
-              onGoApprovals={handleGoApprovals}
-              onOpenSimulator={handleOpenSimulator}
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route
+              path="/dashboard"
+              element={
+                <DashboardPage
+                  lastWsEvent={lastWsEvent}
+                  onSelectIncident={handleSelectIncident}
+                  onGoApprovals={handleGoApprovals}
+                  onOpenSimulator={handleOpenSimulator}
+                />
+              }
             />
-          )}
-
-          {activeTab === 'incidents' && (
-            <IncidentsPage
-              lastWsEvent={lastWsEvent}
-              selectedIncidentId={selectedIncidentId}
-              onClearSelectedIncident={() => setSelectedIncidentId(null)}
+            <Route
+              path="/incidents"
+              element={
+                <IncidentsPage
+                  lastWsEvent={lastWsEvent}
+                />
+              }
             />
-          )}
-
-          {activeTab === 'approvals' && (
-            <ApprovalsPage 
-              lastWsEvent={lastWsEvent}
-              onSelectIncident={handleSelectIncident} 
+            <Route
+              path="/incidents/:incidentId"
+              element={
+                <IncidentsPage
+                  lastWsEvent={lastWsEvent}
+                />
+              }
             />
-          )}
-
-          {activeTab === 'playbooks' && <PlaybooksPage />}
-
-          {activeTab === 'threat-intel' && <ThreatIntelPage />}
-
-          {activeTab === 'simulator' && (
-            <SimulatorPage
-              onSelectIncident={handleSelectIncident}
-              onGoApprovals={handleGoApprovals}
+            <Route
+              path="/approvals"
+              element={
+                <ApprovalsPage
+                  lastWsEvent={lastWsEvent}
+                  onSelectIncident={handleSelectIncident}
+                />
+              }
             />
-          )}
-
-          {activeTab === 'settings' && <SettingsPage />}
+            <Route path="/playbooks" element={<PlaybooksPage />} />
+            <Route path="/threat-intel" element={<ThreatIntelPage />} />
+            <Route
+              path="/simulator"
+              element={
+                <SimulatorPage
+                  onSelectIncident={handleSelectIncident}
+                  onGoApprovals={handleGoApprovals}
+                />
+              }
+            />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
         </main>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ShieldAlert, 
   Search, 
@@ -24,6 +25,9 @@ import MitreBadge from '../components/MitreBadge';
 import { formatLocalDateTime, formatLocalTime } from '../utils/date';
 
 export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncident, lastWsEvent }) {
+  const { incidentId: routeIncidentId } = useParams();
+  const navigate = useNavigate();
+
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeIncident, setActiveIncident] = useState(null);
@@ -72,11 +76,14 @@ export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncid
     }
   }, [lastWsEvent]);
 
+  const targetId = routeIncidentId || selectedIncidentId;
   useEffect(() => {
-    if (selectedIncidentId) {
-      loadIncidentDetail(selectedIncidentId);
+    if (targetId) {
+      loadIncidentDetail(targetId);
+    } else {
+      setActiveIncident(null);
     }
-  }, [selectedIncidentId]);
+  }, [targetId]);
 
   const handleDecision = async (approvalId, decision) => {
     try {
@@ -216,7 +223,10 @@ export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncid
             filteredIncidents.map((inc) => (
               <div
                 key={inc.id}
-                onClick={() => loadIncidentDetail(inc.id)}
+                onClick={() => {
+                  navigate(`/incidents/${inc.id}`);
+                  loadIncidentDetail(inc.id);
+                }}
                 className="p-4 hover:bg-slate-900/60 transition cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group"
               >
                 <div className="space-y-1.5 flex-1 min-w-0">
@@ -317,6 +327,7 @@ export default function IncidentsPage({ selectedIncidentId, onClearSelectedIncid
                 <button
                   onClick={() => {
                     setActiveIncident(null);
+                    navigate('/incidents');
                     if (onClearSelectedIncident) onClearSelectedIncident();
                   }}
                   className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
